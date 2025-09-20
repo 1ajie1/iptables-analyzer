@@ -1,0 +1,221 @@
+{
+  "iptables_rules": [
+    {
+      "table": "filter",
+      "chain": "INPUT",
+      "source_ip": "0.0.0.0/0",
+      "destination_ip": null,
+      "protocol": "tcp",
+      "source_port": null,
+      "destination_port": "22",
+      "action": "ACCEPT",
+      "jump_chain": null,
+      "k8s_resource": null
+    },
+    {
+      "table": "filter",
+      "chain": "INPUT",
+      "source_ip": "192.168.1.0/24",
+      "destination_ip": null,
+      "protocol": "tcp",
+      "source_port": null,
+      "destination_port": "80",
+      "action": "ACCEPT",
+      "jump_chain": null,
+      "k8s_resource": null
+    },
+    {
+      "table": "filter",
+      "chain": "INPUT",
+      "source_ip": "10.0.0.0/8",
+      "destination_ip": null,
+      "protocol": "tcp",
+      "source_port": null,
+      "destination_port": "443",
+      "action": "ACCEPT",
+      "jump_chain": null,
+      "k8s_resource": null
+    },
+    {
+      "table": "filter",
+      "chain": "INPUT",
+      "source_ip": null,
+      "destination_ip": null,
+      "protocol": "tcp",
+      "source_port": null,
+      "destination_port": "8080",
+      "action": "DROP",
+      "jump_chain": null,
+      "k8s_resource": null
+    },
+    {
+      "table": "filter",
+      "chain": "FORWARD",
+      "source_ip": "172.16.0.0/12",
+      "destination_ip": "10.96.0.0/12",
+      "protocol": "tcp",
+      "source_port": null,
+      "destination_port": "80",
+      "action": "ACCEPT",
+      "jump_chain": null,
+      "k8s_resource": {
+        "type": "service",
+        "name": "nginx-service",
+        "namespace": "default",
+        "cluster_ip": "10.96.0.10"
+      }
+    },
+    {
+      "table": "nat",
+      "chain": "PREROUTING",
+      "source_ip": null,
+      "destination_ip": "192.168.1.100",
+      "protocol": "tcp",
+      "source_port": null,
+      "destination_port": "80",
+      "action": "DNAT",
+      "jump_chain": null,
+      "k8s_resource": null
+    },
+    {
+      "table": "nat",
+      "chain": "POSTROUTING",
+      "source_ip": "10.96.0.0/12",
+      "destination_ip": null,
+      "protocol": "tcp",
+      "source_port": null,
+      "destination_port": null,
+      "action": "MASQUERADE",
+      "jump_chain": null,
+      "k8s_resource": null
+    },
+    {
+      "table": "mangle",
+      "chain": "PREROUTING",
+      "source_ip": null,
+      "destination_ip": null,
+      "protocol": "tcp",
+      "source_port": null,
+      "destination_port": "80",
+      "action": "MARK",
+      "jump_chain": null,
+      "k8s_resource": null
+    },
+    {
+      "table": "raw",
+      "chain": "PREROUTING",
+      "source_ip": "192.168.1.0/24",
+      "destination_ip": null,
+      "protocol": "tcp",
+      "source_port": null,
+      "destination_port": "22",
+      "action": "NOTRACK",
+      "jump_chain": null,
+      "k8s_resource": null
+    },
+    {
+      "table": "filter",
+      "chain": "KUBE-SVC-ABCDEF1234567890",
+      "source_ip": null,
+      "destination_ip": null,
+      "protocol": "tcp",
+      "source_port": null,
+      "destination_port": "80",
+      "action": "ACCEPT",
+      "jump_chain": "KUBE-SEP-1234567890ABCDEF",
+      "k8s_resource": {
+        "type": "service",
+        "name": "kubernetes-dashboard",
+        "namespace": "kube-system",
+        "cluster_ip": "10.96.0.1",
+        "service_port": 80,
+        "target_port": 9090
+      }
+    },
+    {
+      "table": "filter",
+      "chain": "KUBE-SEP-1234567890ABCDEF",
+      "source_ip": null,
+      "destination_ip": "10.244.1.5",
+      "protocol": "tcp",
+      "source_port": null,
+      "destination_port": "9090",
+      "action": "ACCEPT",
+      "jump_chain": null,
+      "k8s_resource": {
+        "type": "endpoint",
+        "name": "kubernetes-dashboard",
+        "namespace": "kube-system",
+        "pod_ip": "10.244.1.5",
+        "target_port": 9090
+      }
+    }
+  ],
+  "ipvs_rules": [
+    {
+      "virtual_service": {
+        "ip": "10.96.0.1",
+        "port": "80",
+        "protocol": "TCP",
+        "scheduler": "rr"
+      },
+      "real_servers": [
+        {
+          "ip": "10.244.1.5",
+          "port": "9090",
+          "weight": "1"
+        },
+        {
+          "ip": "10.244.1.6",
+          "port": "9090",
+          "weight": "1"
+        }
+      ]
+    },
+    {
+      "virtual_service": {
+        "ip": "10.96.0.10",
+        "port": "443",
+        "protocol": "TCP",
+        "scheduler": "wrr"
+      },
+      "real_servers": [
+        {
+          "ip": "10.244.2.10",
+          "port": "8443",
+          "weight": "3"
+        },
+        {
+          "ip": "10.244.2.11",
+          "port": "8443",
+          "weight": "2"
+        },
+        {
+          "ip": "10.244.2.12",
+          "port": "8443",
+          "weight": "1"
+        }
+      ]
+    },
+    {
+      "virtual_service": {
+        "ip": "192.168.1.100",
+        "port": "80",
+        "protocol": "TCP",
+        "scheduler": "lc"
+      },
+      "real_servers": [
+        {
+          "ip": "192.168.1.101",
+          "port": "8080",
+          "weight": "1"
+        },
+        {
+          "ip": "192.168.1.102",
+          "port": "8080",
+          "weight": "1"
+        }
+      ]
+    }
+  ]
+}
