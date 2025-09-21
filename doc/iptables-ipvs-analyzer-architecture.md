@@ -458,21 +458,44 @@ class ProcessorService:
 ### 3. 数据访问层 (Data Access Layer)
 
 #### 3.1 iptables数据访问对象
+
+##### 3.1.1 架构设计
+
+工具支持两种Linux内核防火墙接口：
+
+**nf_tables（新一代，优先实现）**：
+- 基于netfilter框架的现代接口
+- 更高效的规则处理
+- 支持更复杂的匹配条件
+- 更好的性能表现
+
+**xt_tables（传统接口，后续支持）**：
+- 传统的iptables接口
+- 广泛兼容性
+- 成熟的生态系统
+
+##### 3.1.2 nf_tables实现（优先）
+
 ```python
-# src/data_access/iptables_dao.py
-# 功能：从Linux系统获取iptables规则，解析为标准格式
-# 特点：使用python-iptables库，支持4个表，错误处理，规则标准化
-import iptc
+# src/data_access/nftables_dao.py
+# 功能：从Linux系统获取nf_tables规则，解析为标准格式
+# 特点：使用nftables命令，支持现代netfilter接口，高性能解析
+import subprocess
+import json
 from typing import List, Optional, Dict
 from src.models.rule_models import IptablesRule, RuleTable
+from src.infrastructure.logger import logger
 
-class IptablesDAO:
+class NftablesDAO:
+    """nf_tables数据访问对象"""
+    
     def __init__(self):
         self.tables = ['filter', 'nat', 'mangle', 'raw']
+        self.nft_cmd = 'nft'
     
     def get_rules(self, table: Optional[str] = None) -> List[IptablesRule]:
-        """获取iptables规则
-        功能：从系统获取iptables规则，支持指定表或全部表
+        """获取nf_tables规则
+        功能：从系统获取nf_tables规则，支持指定表或全部表
         参数：table-指定表名(filter/nat/mangle/raw)，None表示获取所有表
         返回：IptablesRule对象列表，包含解析后的规则信息
         """
@@ -484,8 +507,161 @@ class IptablesDAO:
                 table_rules = self._parse_table(table_name)
                 rules.extend(table_rules)
             except Exception as e:
-                # 记录错误，继续处理其他表
-                self._log_error(f"Failed to parse table {table_name}: {e}")
+                logger.error(f"Failed to parse nf_tables table {table_name}: {e}")
+        
+        return rules
+    
+    def _parse_table(self, table_name: str) -> List[IptablesRule]:
+        """解析指定表的规则"""
+        rules = []
+        
+        # 使用nft命令获取JSON格式的规则
+        # 注意：使用ip family而不是inet，因为系统使用的是ip表
+        cmd = [self.nft_cmd, '-j', 'list', 'table', 'ip', table_name]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        
+        # 解析JSON输出
+        nft_data = json.loads(result.stdout)
+        rules = self._parse_nft_json(nft_data, table_name)
+        
+        return rules
+    
+    def _parse_nft_json(self, nft_data: dict, table_name: str) -> List[IptablesRule]:
+        """解析nftables JSON输出"""
+        rules = []
+        
+        for nft_obj in nft_data.get('nftables', []):
+            if 'rule' in nft_obj:
+                rule_data = nft_obj['rule']
+                parsed_rule = self._parse_nft_rule(rule_data, table_name)
+                if parsed_rule:
+                    rules.append(parsed_rule)
+        
+        return rules
+    
+    def _parse_nft_rule(self, rule_data: dict, table_name: str) -> Optional[IptablesRule]:
+        """解析单个nf_tables规则"""
+        try:
+            # 提取链名
+            chain_name = rule_data.get('chain', '')
+            
+            # 提取匹配条件
+            match_conditions = self._extract_nft_match_conditions(rule_data)
+            
+            # 提取动作
+            action = self._extract_nft_action(rule_data)
+            
+            # 生成规则ID
+            rule_id = f"{table_name}_{chain_name}_{hash(str(rule_data))}"
+            
+            return IptablesRule(
+                rule_id=rule_id,
+                match_conditions=match_conditions,
+                action=action,
+                jump_chain=self._extract_nft_jump_chain(rule_data),
+                target=self._extract_nft_target(rule_data)
+            )
+        except Exception as e:
+            logger.error(f"Failed to parse nf_tables rule: {e}")
+            return None
+    
+    def _extract_nft_match_conditions(self, rule_data: dict) -> 'MatchConditions':
+        """提取nf_tables匹配条件"""
+        from src.models.rule_models import MatchConditions
+        
+        conditions = MatchConditions()
+        
+        # 解析表达式
+        for expr in rule_data.get('expr', []):
+            if isinstance(expr, list) and len(expr) >= 2:
+                expr_type = expr[0]
+                
+                if expr_type == 'match':
+                    # 处理匹配表达式
+                    self._parse_nft_match_expr(expr, conditions)
+                elif expr_type == 'meta':
+                    # 处理元数据表达式
+                    self._parse_nft_meta_expr(expr, conditions)
+        
+        return conditions
+    
+    def _parse_nft_match_expr(self, expr: list, conditions: 'MatchConditions'):
+        """解析nf_tables匹配表达式"""
+        if len(expr) < 3:
+            return
+        
+        match_type = expr[1]
+        match_data = expr[2]
+        
+        if match_type == 'ip':
+            # IP地址匹配
+            if 'saddr' in match_data:
+                conditions.source_ip = match_data['saddr']
+            if 'daddr' in match_data:
+                conditions.destination_ip = match_data['daddr']
+        
+        elif match_type == 'tcp':
+            # TCP协议匹配
+            conditions.protocol = 'tcp'
+            if 'sport' in match_data:
+                conditions.source_port = match_data['sport']
+            if 'dport' in match_data:
+                conditions.destination_port = match_data['dport']
+        
+        elif match_type == 'udp':
+            # UDP协议匹配
+            conditions.protocol = 'udp'
+            if 'sport' in match_data:
+                conditions.source_port = match_data['sport']
+            if 'dport' in match_data:
+                conditions.destination_port = match_data['dport']
+    
+    def _parse_nft_meta_expr(self, expr: list, conditions: 'MatchConditions'):
+        """解析nf_tables元数据表达式"""
+        if len(expr) < 3:
+            return
+        
+        meta_type = expr[1]
+        meta_data = expr[2]
+        
+        if meta_type == 'iifname':
+            conditions.in_interface = meta_data
+        elif meta_type == 'oifname':
+            conditions.out_interface = meta_data
+```
+
+##### 3.1.3 xt_tables实现（后续支持）
+
+```python
+# src/data_access/xtables_dao.py
+# 功能：从Linux系统获取xt_tables规则，解析为标准格式
+# 特点：使用python-iptables库，支持传统iptables接口，广泛兼容性
+import iptc
+from typing import List, Optional, Dict
+from src.models.rule_models import IptablesRule, RuleTable
+from src.infrastructure.logger import logger
+
+class XtablesDAO:
+    """xt_tables数据访问对象（传统iptables接口）"""
+    
+    def __init__(self):
+        self.tables = ['filter', 'nat', 'mangle', 'raw']
+    
+    def get_rules(self, table: Optional[str] = None) -> List[IptablesRule]:
+        """获取xt_tables规则
+        功能：从系统获取传统iptables规则，支持指定表或全部表
+        参数：table-指定表名(filter/nat/mangle/raw)，None表示获取所有表
+        返回：IptablesRule对象列表，包含解析后的规则信息
+        """
+        rules = []
+        tables_to_process = [table] if table else self.tables
+        
+        for table_name in tables_to_process:
+            try:
+                table_rules = self._parse_table(table_name)
+                rules.extend(table_rules)
+            except Exception as e:
+                logger.error(f"Failed to parse xt_tables table {table_name}: {e}")
         
         return rules
     
@@ -497,23 +673,119 @@ class IptablesDAO:
         for chain in table.chains:
             for rule in chain.rules:
                 parsed_rule = self._parse_rule(rule, table_name, chain.name)
-                rules.append(parsed_rule)
+                if parsed_rule:
+                    rules.append(parsed_rule)
         
         return rules
     
-    def _parse_rule(self, rule, table_name: str, chain_name: str) -> IptablesRule:
-        """解析单个规则"""
-        return IptablesRule(
-            table=table_name,
-            chain=chain_name,
-            source_ip=self._extract_source_ip(rule),
-            destination_ip=self._extract_destination_ip(rule),
-            protocol=self._extract_protocol(rule),
-            source_port=self._extract_source_port(rule),
-            destination_port=self._extract_destination_port(rule),
-            action=self._extract_action(rule),
-            jump_chain=self._extract_jump_chain(rule)
-        )
+    def _parse_rule(self, rule, table_name: str, chain_name: str) -> Optional[IptablesRule]:
+        """解析单个xt_tables规则"""
+        try:
+            from src.models.rule_models import MatchConditions
+            
+            # 生成规则ID
+            rule_id = f"{table_name}_{chain_name}_{hash(str(rule))}"
+            
+            # 提取匹配条件
+            match_conditions = MatchConditions(
+                source_ip=self._extract_source_ip(rule),
+                destination_ip=self._extract_destination_ip(rule),
+                protocol=self._extract_protocol(rule),
+                source_port=self._extract_source_port(rule),
+                destination_port=self._extract_destination_port(rule),
+                in_interface=self._extract_in_interface(rule),
+                out_interface=self._extract_out_interface(rule),
+                state=self._extract_state(rule)
+            )
+            
+            return IptablesRule(
+                rule_id=rule_id,
+                match_conditions=match_conditions,
+                action=self._extract_action(rule),
+                jump_chain=self._extract_jump_chain(rule),
+                target=self._extract_target(rule)
+            )
+        except Exception as e:
+            logger.error(f"Failed to parse xt_tables rule: {e}")
+            return None
+```
+
+##### 3.1.4 统一接口适配器
+
+```python
+# src/data_access/iptables_adapter.py
+# 功能：统一nf_tables和xt_tables接口，提供统一的规则访问
+# 特点：自动检测系统支持，优先使用nf_tables，降级到xt_tables
+from typing import List, Optional, Dict, Union
+from src.data_access.nftables_dao import NftablesDAO
+from src.data_access.xtables_dao import XtablesDAO
+from src.models.rule_models import IptablesRule
+from src.infrastructure.logger import logger
+
+class IptablesAdapter:
+    """iptables统一接口适配器"""
+    
+    def __init__(self, preferred_backend: str = "nftables"):
+        self.preferred_backend = preferred_backend
+        self.nft_dao = None
+        self.xt_dao = None
+        self._initialize_backends()
+    
+    def _initialize_backends(self):
+        """初始化后端接口"""
+        try:
+            # 尝试初始化nf_tables
+            self.nft_dao = NftablesDAO()
+            logger.info("nf_tables backend initialized successfully")
+        except Exception as e:
+            logger.warning(f"Failed to initialize nftables backend: {e}")
+            self.nft_dao = None
+        
+        try:
+            # 尝试初始化xt_tables
+            self.xt_dao = XtablesDAO()
+            logger.info("xt_tables backend initialized successfully")
+        except Exception as e:
+            logger.warning(f"Failed to initialize xtables backend: {e}")
+            self.xt_dao = None
+    
+    def get_rules(self, table: Optional[str] = None) -> List[IptablesRule]:
+        """获取iptables规则（统一接口）
+        功能：自动选择可用的后端接口获取规则
+        参数：table-指定表名，None表示获取所有表
+        返回：IptablesRule对象列表
+        """
+        if self.preferred_backend == "nftables" and self.nft_dao:
+            try:
+                return self.nft_dao.get_rules(table)
+            except Exception as e:
+                logger.warning(f"nftables backend failed, falling back to xtables: {e}")
+        
+        if self.xt_dao:
+            try:
+                return self.xt_dao.get_rules(table)
+            except Exception as e:
+                logger.error(f"xtables backend also failed: {e}")
+                raise
+        
+        raise RuntimeError("No available iptables backend")
+    
+    def get_available_backends(self) -> List[str]:
+        """获取可用的后端接口列表"""
+        backends = []
+        if self.nft_dao:
+            backends.append("nftables")
+        if self.xt_dao:
+            backends.append("xtables")
+        return backends
+    
+    def set_preferred_backend(self, backend: str):
+        """设置首选后端接口"""
+        if backend in self.get_available_backends():
+            self.preferred_backend = backend
+            logger.info(f"Preferred backend set to: {backend}")
+        else:
+            raise ValueError(f"Backend {backend} not available")
 ```
 
 #### 3.2 ipvs数据访问对象
@@ -1443,8 +1715,10 @@ iptables-analyzer              # 单文件可执行程序，包含所有依赖�
 ## 技术选型说明
 
 ### 核心依赖
+
+#### nf_tables技术栈
 ```toml
-# pyproject.toml
+# pyproject.toml - nf_tables支持
 [project]
 name = "iptables-ipvs-analyzer"
 version = "0.1.0"
@@ -1453,13 +1727,206 @@ authors = [{name = "Your Name", email = "your.email@example.com"}]
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "python-iptables>=0.14.0",    # iptables规则解析
+    # nf_tables支持（优先）- 使用系统nft命令
+    # 注意：nf_tables通过subprocess调用系统nft命令，无需Python包
+    
+    # xt_tables支持（降级）
+    "python-iptables>=0.14.0",    # 传统iptables规则解析
+    
+    # 核心框架
     "typer>=0.9.0",               # CLI框架
     "jinja2>=3.1.0",              # 模板引擎
     "graphviz>=0.20.0",           # 图表生成
     "pyecharts>=1.9.0",           # 高级可视化（可选）
     "kubernetes>=24.0.0",         # K8s客户端（可选）
 ]
+```
+#### 技术实现对比
+
+| 特性 | nf_tables | xt_tables |
+|------|-----------|-----------|
+| **内核接口** | 现代netfilter框架 | 传统iptables接口 |
+| **性能** | 更高性能，更少内存占用 | 传统性能 |
+| **功能** | 支持更复杂的匹配条件 | 基础匹配功能 |
+| **JSON支持** | 原生JSON输出 | 需要解析文本 |
+| **Python实现** | subprocess + nft命令 | python-iptables库 |
+| **系统依赖** | nftables工具 | iptables工具 |
+| **兼容性** | 较新内核（3.13+） | 广泛兼容 |
+| **学习曲线** | 较新，文档相对较少 | 成熟，文档丰富 |
+
+#### nf_tables实现技术
+
+**1. 命令接口**
+```bash
+# 获取JSON格式规则
+nft -j list table ip filter
+
+# 输出示例
+{
+  "nftables": [
+    {
+      "table": {
+        "family": "inet",
+        "name": "filter"
+      }
+    },
+    {
+      "chain": {
+        "family": "inet",
+        "table": "filter",
+        "name": "INPUT",
+        "type": "filter",
+        "hook": "input",
+        "prio": 0
+      }
+    },
+    {
+      "rule": {
+        "family": "inet",
+        "table": "filter",
+        "chain": "INPUT",
+        "expr": [
+          {
+            "match": {
+              "op": "==",
+              "left": {
+                "meta": {
+                  "key": "protocol"
+                }
+              },
+              "right": "tcp"
+            }
+          },
+          {
+            "match": {
+              "op": "==",
+              "left": {
+                "tcp": {
+                  "dport": 80
+                }
+              },
+              "right": 80
+            }
+          },
+          {
+            "accept": null
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+**2. Python子进程调用**
+```python
+# 使用nft命令
+import subprocess
+import json
+
+result = subprocess.run(['nft', '-j', 'list', 'table', 'ip', 'filter'], 
+                       capture_output=True, text=True)
+nft_data = json.loads(result.stdout)
+```
+
+#### xt_tables实现技术
+
+**1. python-iptables库**
+```python
+import iptc
+
+# 获取表
+table = iptc.Table(iptc.Table.FILTER)
+
+# 遍历链
+for chain in table.chains:
+    for rule in chain.rules:
+        # 解析规则
+        print(f"Rule: {rule}")
+```
+
+**2. iptables-save命令**
+```bash
+# 获取规则文本
+iptables-save -t filter
+
+# 输出示例
+# Generated by iptables-save v1.8.7 on Mon Jan 15 10:30:00 2024
+*filter
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+-A INPUT -p tcp --dport 80 -j ACCEPT
+COMMIT
+```
+
+**3. 文本解析**
+```python
+# 解析iptables-save输出
+def parse_iptables_save(output: str) -> List[Rule]:
+    rules = []
+    current_table = None
+    
+    for line in output.split('\n'):
+        if line.startswith('*'):
+            current_table = line[1:]
+        elif line.startswith('-A'):
+            rule = parse_rule_line(line, current_table)
+            rules.append(rule)
+    
+    return rules
+```
+
+#### 配置管理更新
+
+**default.yaml配置**
+```yaml
+parser:
+  iptables:
+    enabled: true
+    backend: "nftables"  # 优先使用nf_tables
+    tables: ["raw", "mangle", "nat", "filter"]
+    nftables:
+      command: "nft"
+      json_output: true
+      timeout: 30
+      family: "ip"    # 支持ip, ip6, inet（根据系统实际情况）
+    xtables:
+      command: "iptables-save"
+      timeout: 30
+      fallback: true  # 是否允许降级到xt_tables
+  ipvs:
+    enabled: true
+  k8s:
+    enabled: true
+    config_path: "~/.kube/config"
+```
+
+**config.py更新**
+```python
+def _get_default_config(self) -> Dict[str, Any]:
+    return {
+        'parser': {
+            'iptables': {
+                'enabled': True,
+                'backend': 'nftables',  # 默认使用nf_tables
+                'tables': ['raw', 'mangle', 'nat', 'filter'],
+                'nftables': {
+                    'command': 'nft',
+                    'json_output': True,
+                    'timeout': 30,
+                    'family': 'ip'
+                },
+                'xtables': {
+                    'command': 'iptables-save',
+                    'timeout': 30,
+                    'fallback': True
+                }
+            },
+            # ... 其他配置
+        }
+    }
+```
 
 [project.optional-dependencies]
 dev = [
@@ -1582,15 +2049,52 @@ touch src/utils/__init__.py
 # - format_utils.py: 格式化工具
 ```
 
-#### 第2周：iptables解析功能开发
+#### 第2周：iptables解析功能开发（nf_tables优先）
 
-**第1-2天：iptables数据访问层**
+**第1-2天：nf_tables数据访问层**
 ```python
-# src/data_access/iptables_dao.py
-# 1. 实现IptablesDAO类
-# 2. 使用python-iptables库读取规则
-# 3. 实现基础规则解析逻辑
+# src/data_access/nftables_dao.py
+# 1. 实现NftablesDAO类
+# 2. 使用nft命令获取JSON格式规则
+# 3. 实现nf_tables规则解析逻辑
 # 4. 支持4个表（raw, mangle, nat, filter）的解析
+# 5. 实现JSON表达式解析器
+
+# 技术要点：
+# - 使用 subprocess 调用 nft -j list table inet <table>
+# - 解析 nftables JSON 输出格式
+# - 处理 match, meta, verdict 等表达式类型
+# - 支持 IP、TCP、UDP、接口等匹配条件
+```
+
+**第3-4天：xt_tables数据访问层（降级支持）**
+```python
+# src/data_access/xtables_dao.py
+# 1. 实现XtablesDAO类
+# 2. 使用python-iptables库读取规则
+# 3. 实现传统iptables规则解析逻辑
+# 4. 作为nf_tables的降级方案
+
+# 技术要点：
+# - 使用 python-iptables 库
+# - 支持 iptables-save 命令解析
+# - 实现规则文本解析器
+# - 提供与nf_tables相同的接口
+```
+
+**第5-7天：统一接口适配器**
+```python
+# src/data_access/iptables_adapter.py
+# 1. 实现IptablesAdapter类
+# 2. 自动检测系统支持的接口
+# 3. 优先使用nf_tables，降级到xt_tables
+# 4. 提供统一的规则访问接口
+
+# 技术要点：
+# - 检测 nft 命令是否可用
+# - 检测 python-iptables 库是否可用
+# - 实现自动降级机制
+# - 提供配置选项控制首选接口
 ```
 
 **第3-4天：规则解析服务**
@@ -2253,3 +2757,63 @@ hotfix/紧急修复
 ```
 
 这个补充指南为个人开发提供了完整的开发、测试、部署和维护流程，确保项目能够顺利开发和发布。
+
+---
+
+## nf_tables vs xt_tables 实现策略总结
+
+### 实现优先级
+
+**第一阶段：nf_tables优先实现**
+- ✅ **优先实现**：使用现代nf_tables接口
+- ✅ **技术优势**：JSON原生支持，性能更好
+- ✅ **未来导向**：Linux内核的发展方向
+- ✅ **实现复杂度**：中等（需要解析JSON表达式）
+
+**第二阶段：xt_tables降级支持**
+- ⚠️ **后续实现**：作为兼容性降级方案
+- ⚠️ **技术成熟**：python-iptables库成熟稳定
+- ⚠️ **兼容性**：支持更广泛的系统
+- ⚠️ **实现复杂度**：较低（库接口简单）
+
+### 技术实现对比
+
+| 方面 | nf_tables | xt_tables |
+|------|-----------|-----------|
+| **命令接口** | `nft -j list table ip filter` | `iptables-save -t filter` |
+| **数据格式** | JSON（结构化） | 文本（需要解析） |
+| **Python实现** | subprocess + nft命令 | python-iptables库 |
+| **性能** | 更高（内核优化） | 传统性能 |
+| **学习成本** | 较高（新接口） | 较低（成熟接口） |
+| **系统要求** | 内核3.13+ | 广泛兼容 |
+
+### 开发建议
+
+**1. 先实现nf_tables**
+- 使用`nft`命令获取JSON格式规则
+- 实现JSON表达式解析器
+- 支持现代netfilter特性
+
+**2. 再实现xt_tables**
+- 使用`python-iptables`库
+- 作为降级方案
+- 确保接口兼容性
+
+**3. 统一适配器**
+- 自动检测可用接口
+- 优先使用nf_tables
+- 无缝降级到xt_tables
+
+**4. 配置管理**
+- 支持用户选择首选接口
+- 提供降级配置选项
+- 记录使用的接口类型
+
+### 实现时间线
+
+- **第2周前3天**：实现nf_tables数据访问层
+- **第2周后2天**：实现xt_tables数据访问层  
+- **第2周末**：实现统一适配器
+- **第3周**：集成测试和优化
+
+这种策略确保了项目的现代化和兼容性，既支持最新的nf_tables接口，又保持了与旧系统的兼容性。

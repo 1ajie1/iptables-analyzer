@@ -13,6 +13,8 @@ dependencies = [
     "pyecharts>=1.9.0", # 高级可视化（可选）
     "kubernetes>=24.0.0", # K8s客户端（可选）
     "pyyaml>=6.0.2",
+    "pyaml>=25.7.0",
+    "rich>=14.1.0",
 ]
 
 [project.optional-dependencies]

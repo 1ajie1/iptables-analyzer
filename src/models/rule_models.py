@@ -77,53 +77,20 @@ class RuleSet:
     
     def to_dict(self) -> dict:
         """转换为字典格式，便于JSON序列化"""
-        return {
+        result = {
             'metadata': self.metadata,
-            'iptables_rules': {
-                table_name: {
-                    chain_name: {
-                        'default_policy': chain_data.default_policy,
-                        'rules': [
-                            {
-                                'rule_id': rule.rule_id,
-                                'match_conditions': {
-                                    'source_ip': rule.match_conditions.source_ip,
-                                    'destination_ip': rule.match_conditions.destination_ip,
-                                    'protocol': rule.match_conditions.protocol,
-                                    'source_port': rule.match_conditions.source_port,
-                                    'destination_port': rule.match_conditions.destination_port,
-                                    'in_interface': rule.match_conditions.in_interface,
-                                    'out_interface': rule.match_conditions.out_interface,
-                                    'state': rule.match_conditions.state
-                                },
-                                'action': rule.action,
-                                'jump_chain': rule.jump_chain,
-                                'target': rule.target
-                            } for rule in chain_data.rules
-                        ]
-                    } for chain_name, chain_data in table_data.__dict__.items()
-                } for table_name, table_data in self.iptables_rules.items()
-            },
-            'ipvs_rules': {
-                'virtual_services': [
-                    {
-                        'vs_id': vs.vs_id,
-                        'ip': vs.ip,
-                        'port': vs.port,
-                        'protocol': vs.protocol,
-                        'scheduler': vs.scheduler,
-                        'real_servers': [
-                            {
-                                'rs_id': rs.rs_id,
-                                'ip': rs.ip,
-                                'port': rs.port,
-                                'weight': rs.weight
-                            } for rs in vs.real_servers
-                        ]
-                    } for vs in self.ipvs_rules['virtual_services']
-                ]
-            }
+            'iptables_rules': {},
+            'ipvs_rules': self.ipvs_rules or {"virtual_services": []}
         }
+        
+        # 处理iptables_rules - 支持字典格式
+        if isinstance(self.iptables_rules, dict):
+            result['iptables_rules'] = self.iptables_rules
+        else:
+            # 如果是其他格式，尝试转换
+            result['iptables_rules'] = {}
+        
+        return result
     
     @classmethod
     def from_dict(cls, data: dict) -> 'RuleSet':
