@@ -1,0 +1,5 @@
+---
+description: 我使用uv管理项目，但需要先进入conda的base环境（conda activate base）
+globs:
+alwaysApply: true
+---

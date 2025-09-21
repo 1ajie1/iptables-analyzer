@@ -75,39 +75,339 @@
 #### 2. 子模块设计
 
 *   **iptables 解析子模块**
+
+完整的JSON数据结构如下：
+
 ```json
 {
-
-   "table": "filter",
-
-   "chain": "INPUT",
-
-   "rules": [
-
-       {
-
-           "rule_id": "1",
-
-           "match_conditions": {
-
-               "source_ip": "192.168.1.0/24",
-
-               "protocol": "tcp",
-
-               "destination_port": "80"
-
-           },
-
-           "action": "ACCEPT",
-
-           "jump_chain": None
-
-       }
-
-   ]
-
+  "metadata": {
+    "generated_at": "2024-01-15T10:30:00Z",
+    "tool_version": "1.0.0",
+    "environment": {
+      "os": "Linux",
+      "kernel_version": "6.1.0-39-amd64",
+      "iptables_version": "1.8.7",
+      "ipvs_version": "1.2.1"
+    }
+  },
+  "iptables_rules": {
+    "raw": {
+      "PREROUTING": {
+        "default_policy": "ACCEPT",
+        "rules": [
+          {
+            "rule_id": "1",
+            "match_conditions": {
+              "source_ip": null,
+              "destination_ip": null,
+              "protocol": "tcp",
+              "source_port": null,
+              "destination_port": 80,
+              "in_interface": null,
+              "out_interface": null,
+              "state": null
+            },
+            "action": "CT",
+            "jump_chain": null,
+            "target": null
+          }
+        ]
+      },
+      "OUTPUT": {
+        "default_policy": "ACCEPT",
+        "rules": []
+      }
+    },
+    "mangle": {
+      "PREROUTING": {
+        "default_policy": "ACCEPT",
+        "rules": []
+      },
+      "INPUT": {
+        "default_policy": "ACCEPT",
+        "rules": []
+      },
+      "FORWARD": {
+        "default_policy": "ACCEPT",
+        "rules": []
+      },
+      "OUTPUT": {
+        "default_policy": "ACCEPT",
+        "rules": []
+      },
+      "POSTROUTING": {
+        "default_policy": "ACCEPT",
+        "rules": []
+      }
+    },
+    "nat": {
+      "PREROUTING": {
+        "default_policy": "ACCEPT",
+        "rules": [
+          {
+            "rule_id": "1",
+            "match_conditions": {
+              "source_ip": null,
+              "destination_ip": "10.96.0.10",
+              "protocol": "tcp",
+              "source_port": null,
+              "destination_port": 80,
+              "in_interface": null,
+              "out_interface": null,
+              "state": null
+            },
+            "action": "DNAT",
+            "jump_chain": "KUBE-SVC-ABCD1234",
+            "target": "10.244.1.10:80"
+          }
+        ]
+      },
+      "INPUT": {
+        "default_policy": "ACCEPT",
+        "rules": []
+      },
+      "OUTPUT": {
+        "default_policy": "ACCEPT",
+        "rules": [
+          {
+            "rule_id": "1",
+            "match_conditions": {
+              "source_ip": null,
+              "destination_ip": "10.96.0.10",
+              "protocol": "tcp",
+              "source_port": null,
+              "destination_port": 80,
+              "in_interface": null,
+              "out_interface": null,
+              "state": null
+            },
+            "action": "DNAT",
+            "jump_chain": "KUBE-SVC-ABCD1234",
+            "target": "10.244.1.10:80"
+          }
+        ]
+      },
+      "POSTROUTING": {
+        "default_policy": "ACCEPT",
+        "rules": [
+          {
+            "rule_id": "1",
+            "match_conditions": {
+              "source_ip": "10.244.0.0/16",
+              "destination_ip": "10.244.0.0/16",
+              "protocol": null,
+              "source_port": null,
+              "destination_port": null,
+              "in_interface": null,
+              "out_interface": null,
+              "state": null
+            },
+            "action": "MASQUERADE",
+            "jump_chain": null,
+            "target": null
+          }
+        ]
+      },
+      "KUBE-SVC-ABCD1234": {
+        "default_policy": "RETURN",
+        "rules": [
+          {
+            "rule_id": "1",
+            "match_conditions": {
+              "source_ip": null,
+              "destination_ip": null,
+              "protocol": "tcp",
+              "source_port": null,
+              "destination_port": 80,
+              "in_interface": null,
+              "out_interface": null,
+              "state": null
+            },
+            "action": "DNAT",
+            "jump_chain": "KUBE-SEP-DEFG5678",
+            "target": "10.244.1.10:80"
+          }
+        ]
+      },
+      "KUBE-SEP-DEFG5678": {
+        "default_policy": "RETURN",
+        "rules": [
+          {
+            "rule_id": "1",
+            "match_conditions": {
+              "source_ip": null,
+              "destination_ip": null,
+              "protocol": "tcp",
+              "source_port": null,
+              "destination_port": 80,
+              "in_interface": null,
+              "out_interface": null,
+              "state": null
+            },
+            "action": "DNAT",
+            "jump_chain": null,
+            "target": "10.244.1.10:80"
+          }
+        ]
+      }
+    },
+    "filter": {
+      "INPUT": {
+        "default_policy": "DROP",
+        "rules": [
+          {
+            "rule_id": "1",
+            "match_conditions": {
+              "source_ip": null,
+              "destination_ip": null,
+              "protocol": "tcp",
+              "source_port": null,
+              "destination_port": 22,
+              "in_interface": null,
+              "out_interface": null,
+              "state": null
+            },
+            "action": "ACCEPT",
+            "jump_chain": null,
+            "target": null
+          },
+          {
+            "rule_id": "2",
+            "match_conditions": {
+              "source_ip": "10.244.0.0/16",
+              "destination_ip": null,
+              "protocol": "tcp",
+              "source_port": null,
+              "destination_port": 80,
+              "in_interface": null,
+              "out_interface": null,
+              "state": null
+            },
+            "action": "ACCEPT",
+            "jump_chain": null,
+            "target": null
+          },
+          {
+            "rule_id": "3",
+            "match_conditions": {
+              "source_ip": null,
+              "destination_ip": null,
+              "protocol": "tcp",
+              "source_port": null,
+              "destination_port": 80,
+              "in_interface": null,
+              "out_interface": null,
+              "state": null
+            },
+            "action": "ACCEPT",
+            "jump_chain": null,
+            "target": null
+          }
+        ]
+      },
+      "FORWARD": {
+        "default_policy": "DROP",
+        "rules": [
+          {
+            "rule_id": "1",
+            "match_conditions": {
+              "source_ip": "10.244.0.0/16",
+              "destination_ip": "10.244.0.0/16",
+              "protocol": null,
+              "source_port": null,
+              "destination_port": null,
+              "in_interface": null,
+              "out_interface": null,
+              "state": null
+            },
+            "action": "ACCEPT",
+            "jump_chain": null,
+            "target": null
+          }
+        ]
+      },
+      "OUTPUT": {
+        "default_policy": "ACCEPT",
+        "rules": [
+          {
+            "rule_id": "1",
+            "match_conditions": {
+              "source_ip": null,
+              "destination_ip": null,
+              "protocol": "tcp",
+              "source_port": null,
+              "destination_port": 80,
+              "in_interface": null,
+              "out_interface": null,
+              "state": null
+            },
+            "action": "ACCEPT",
+            "jump_chain": null,
+            "target": null
+          }
+        ]
+      }
+    }
+  },
+  "ipvs_rules": {
+    "virtual_services": [
+      {
+        "vs_id": "1",
+        "ip": "10.96.0.10",
+        "port": 80,
+        "protocol": "tcp",
+        "scheduler": "rr",
+        "real_servers": [
+          {
+            "rs_id": "1-1",
+            "ip": "10.244.1.10",
+            "port": 80,
+            "weight": 1
+          },
+          {
+            "rs_id": "1-2",
+            "ip": "10.244.1.11",
+            "port": 80,
+            "weight": 1
+          }
+        ]
+      },
+      {
+        "vs_id": "2",
+        "ip": "10.96.0.1",
+        "port": 443,
+        "protocol": "tcp",
+        "scheduler": "rr",
+        "real_servers": [
+          {
+            "rs_id": "2-1",
+            "ip": "192.168.1.100",
+            "port": 6443,
+            "weight": 1
+          }
+        ]
+      }
+    ]
+  }
 }
 ```
+
+**数据结构说明**：
+
+1. **元数据部分**：包含生成时间、工具版本、环境信息
+2. **iptables规则部分**：按Linux内核表优先级组织（raw→mangle→nat→filter）
+3. **匹配条件统一结构**：
+   - `source_ip`/`destination_ip`：支持CIDR格式（如"10.244.0.0/16"）
+   - `protocol`：协议类型（tcp/udp/icmp等）
+   - `source_port`/`destination_port`：端口号（数字类型）
+   - `in_interface`/`out_interface`：接口名称（为扩展预留）
+   - `state`：连接状态（为扩展预留）
+   - 使用`null`表示未设置的匹配条件
+4. **规则动作**：
+   - `action`：动作类型（ACCEPT/DROP/DNAT/MASQUERADE等）
+   - `jump_chain`：跳转链（自定义链名称）
+   - `target`：目标地址（用于DNAT等）
+5. **ipvs规则部分**：虚拟服务和真实服务器信息
 
 
 
@@ -174,45 +474,45 @@ for idx, rule in enumerate(chain.rules, 1):
 *   关键操作示例：使用`python-iptables`读取 filter 表 INPUT 链规则：
 
 *   **ipvs 解析子模块**
-```
-{
 
-   "virtual_services": [
+ipvs规则数据结构已集成到上述完整JSON中，具体结构如下：
 
-       {
-
-           "vs_id": "1",
-
-           "ip": "10.96.0.1",
-
-           "port": "443",
-
-           "protocol": "tcp",
-
-           "scheduler": "rr",
-
-           "real_servers": [
-
-               {
-
-                   "rs_id": "1-1",
-
-                   "ip": "10.244.1.10",
-
-                   "port": "443",
-
-                   "weight": "1"
-
-               }
-
-           ]
-
-       }
-
-   ]
-
+```json
+"ipvs_rules": {
+  "virtual_services": [
+    {
+      "vs_id": "1",
+      "ip": "10.96.0.10",
+      "port": 80,
+      "protocol": "tcp",
+      "scheduler": "rr",
+      "real_servers": [
+        {
+          "rs_id": "1-1",
+          "ip": "10.244.1.10",
+          "port": 80,
+          "weight": 1
+        },
+        {
+          "rs_id": "1-2",
+          "ip": "10.244.1.11",
+          "port": 80,
+          "weight": 1
+        }
+      ]
+    }
+  ]
 }
 ```
+
+**ipvs数据结构说明**：
+- `vs_id`：虚拟服务唯一标识
+- `ip`/`port`/`protocol`：虚拟服务监听地址和协议
+- `scheduler`：负载均衡调度算法（rr/wrr/lc等）
+- `real_servers`：真实服务器列表
+  - `rs_id`：真实服务器唯一标识
+  - `ip`/`port`：真实服务器地址和端口
+  - `weight`：权重值（数字类型）
 
 
 
@@ -255,7 +555,94 @@ for idx, rule in enumerate(chain.rules, 1):
 
     *   扩展条件匹配：针对`-m state`（连接状态）、`-m multiport`（多端口）等扩展模块，基于解析模块提取的条件参数，实现匹配逻辑。例如，`-m state --state ESTABLISHED`表示匹配已建立的连接，判断请求是否属于已存在的连接（可结合`conntrack`工具的输出辅助判断，或基于规则上下文模拟连接状态）。
 
-    *   条件组合逻辑：支持多条件的 “与” 逻辑组合（iptables 规则默认多条件为 “与” 关系），即只有当所有匹配条件均满足时，规则才命中。
+    *   条件组合逻辑：支持多条件的 "与" 逻辑组合（iptables 规则默认多条件为 "与" 关系），即只有当所有匹配条件均满足时，规则才命中。
+
+    *   **基于JSON格式的匹配算法实现**：
+
+```python
+def match_rule(rule, packet):
+    """基于JSON格式的规则匹配算法"""
+    conditions = rule['match_conditions']
+    
+    # 检查源IP匹配
+    if conditions['source_ip'] and not match_ip(packet['src_ip'], conditions['source_ip']):
+        return False
+    
+    # 检查目标IP匹配
+    if conditions['destination_ip'] and not match_ip(packet['dst_ip'], conditions['destination_ip']):
+        return False
+    
+    # 检查协议匹配
+    if conditions['protocol'] and packet['protocol'] != conditions['protocol']:
+        return False
+    
+    # 检查源端口匹配
+    if conditions['source_port'] and packet['src_port'] != conditions['source_port']:
+        return False
+    
+    # 检查目标端口匹配
+    if conditions['destination_port'] and packet['dst_port'] != conditions['destination_port']:
+        return False
+    
+    # 检查接口匹配（为扩展预留）
+    if conditions['in_interface'] and packet['in_interface'] != conditions['in_interface']:
+        return False
+    
+    if conditions['out_interface'] and packet['out_interface'] != conditions['out_interface']:
+        return False
+    
+    # 检查连接状态匹配（为扩展预留）
+    if conditions['state'] and packet['state'] != conditions['state']:
+        return False
+    
+    return True
+
+def match_ip(ip, cidr):
+    """IP地址匹配，支持CIDR格式"""
+    if '/' in cidr:
+        # CIDR格式匹配
+        import ipaddress
+        return ipaddress.ip_address(ip) in ipaddress.ip_network(cidr, strict=False)
+    else:
+        # 精确匹配
+        return ip == cidr
+
+def simulate_traffic(packet, rules_data):
+    """基于JSON格式的流量模拟"""
+    # 按表优先级顺序处理
+    table_order = ['raw', 'mangle', 'nat', 'filter']
+    
+    for table_name in table_order:
+        table = rules_data['iptables_rules'][table_name]
+        
+        # 根据流量方向选择链
+        chain_name = get_chain_for_direction(packet['direction'])
+        if chain_name not in table:
+            continue
+            
+        chain = table[chain_name]
+        
+        # 遍历规则进行匹配
+        for rule in chain['rules']:
+            if match_rule(rule, packet):
+                return {
+                    'matched': True,
+                    'table': table_name,
+                    'chain': chain_name,
+                    'rule_id': rule['rule_id'],
+                    'action': rule['action'],
+                    'jump_chain': rule['jump_chain'],
+                    'target': rule['target']
+                }
+        
+        # 执行默认策略
+        return {
+            'matched': False,
+            'table': table_name,
+            'chain': chain_name,
+            'action': chain['default_policy']
+        }
+```
 
 *   **Kubernetes 路径还原**
 

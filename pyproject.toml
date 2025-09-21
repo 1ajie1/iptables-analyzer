@@ -1,0 +1,54 @@
+[project]
+name = "iptables-ipvs-analyzer"
+version = "0.1.0"
+description = "Linux iptables/ipvs数据包流向分析工具"
+authors = [{name = "Your Name", email = "your.email@example.com"}]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "python-iptables>=0.14.0", # iptables规则解析
+    "typer>=0.9.0", # CLI框架
+    "jinja2>=3.1.0", # 模板引擎
+    "graphviz>=0.20.0", # 图表生成
+    "pyecharts>=1.9.0", # 高级可视化（可选）
+    "kubernetes>=24.0.0", # K8s客户端（可选）
+    "pyyaml>=6.0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",             # 测试框架
+    "black>=22.0.0",              # 代码格式化
+    "flake8>=5.0.0",              # 代码检查
+    "mypy>=0.950",                # 类型检查
+    "ruff>=0.1.0",                # 快速代码检查
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0",
+    "black>=22.0.0",
+    "flake8>=5.0.0",
+    "mypy>=0.950",
+    "ruff>=0.1.0",
+]
+
+[tool.black]
+line-length = 88
+target-version = ['py311']
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true

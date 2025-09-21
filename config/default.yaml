@@ -1,0 +1,29 @@
+# iptables-ipvs-analyzer 默认配置文件
+
+parser:
+  iptables:
+    enabled: true
+    tables: ["raw", "mangle", "nat", "filter"]
+  ipvs:
+    enabled: true
+  k8s:
+    enabled: true
+    config_path: "~/.kube/config"
+
+simulator:
+  matching:
+    strict_mode: false
+    debug_mode: false
+
+visualization:
+  charts:
+    max_rules_display: 1000
+    theme: "light"
+  reports:
+    output_format: "html"
+    include_charts: true
+
+logging:
+  level: "INFO"
+  file: null
+  console: true

@@ -2,13 +2,17 @@
 
 ## 架构概述
 
-### 四大核心功能
-本工具提供四大核心功能，每个功能都有明确的职责和输出：
+### 核心功能规划
+
+#### v1.0版本（核心功能）
+本工具v1.0版本提供三大核心功能，每个功能都有明确的职责和输出：
 
 1. **规则解析功能 (parse)**：从Linux系统获取iptables/ipvs规则，生成结构化JSON文件
 2. **命令行演示功能 (demo)**：使用指定参数演示流量匹配过程，直接输出结果
-3. **Web演示功能 (web_demo)**：基于JSON文件生成交互式静态网页，用户可自由设置参数
-4. **规则处理功能 (process)**：对匹配到的规则进行后续处理，当前支持K8s服务关联
+3. **规则处理功能 (process)**：对匹配到的规则进行后续处理，当前支持K8s服务关联
+
+#### v2.0版本（扩展功能）
+4. **Web演示功能 (web_demo)**：基于JSON文件生成交互式静态网页，用户可自由设置参数
 
 ### 设计原则
 - **单文件工具**：所有功能集成在一个可执行文件中
@@ -674,63 +678,569 @@ class TableProcessor:
 
 ### 5. 数据模型层 (Data Models)
 
-#### 5.1 规则模型
+#### 5.1 规则模型与JSON格式规范
+
+##### 5.1.1 标准JSON格式定义
+工具使用统一的JSON格式存储和交换规则数据，该格式经过优化，完全满足程序读取和规则匹配的要求：
+
+```json
+{
+  "metadata": {
+    "generated_at": "2024-01-15T10:30:00Z",
+    "tool_version": "1.0.0",
+    "environment": {
+      "os": "Linux",
+      "kernel_version": "6.1.0-39-amd64",
+      "iptables_version": "1.8.7",
+      "ipvs_version": "1.2.1"
+    }
+  },
+  "iptables_rules": {
+    "raw": {
+      "PREROUTING": {
+        "default_policy": "ACCEPT",
+        "rules": [
+          {
+            "rule_id": "1",
+            "match_conditions": {
+              "source_ip": null,
+              "destination_ip": null,
+              "protocol": "tcp",
+              "source_port": null,
+              "destination_port": 80,
+              "in_interface": null,
+              "out_interface": null,
+              "state": null
+            },
+            "action": "CT",
+            "jump_chain": null,
+            "target": null
+          }
+        ]
+      },
+      "OUTPUT": {
+        "default_policy": "ACCEPT",
+        "rules": []
+      }
+    },
+    "mangle": {
+      "PREROUTING": {
+        "default_policy": "ACCEPT",
+        "rules": []
+      },
+      "INPUT": {
+        "default_policy": "ACCEPT",
+        "rules": []
+      },
+      "FORWARD": {
+        "default_policy": "ACCEPT",
+        "rules": []
+      },
+      "OUTPUT": {
+        "default_policy": "ACCEPT",
+        "rules": []
+      },
+      "POSTROUTING": {
+        "default_policy": "ACCEPT",
+        "rules": []
+      }
+    },
+    "nat": {
+      "PREROUTING": {
+        "default_policy": "ACCEPT",
+        "rules": [
+          {
+            "rule_id": "1",
+            "match_conditions": {
+              "source_ip": null,
+              "destination_ip": "10.96.0.10",
+              "protocol": "tcp",
+              "source_port": null,
+              "destination_port": 80,
+              "in_interface": null,
+              "out_interface": null,
+              "state": null
+            },
+            "action": "DNAT",
+            "jump_chain": "KUBE-SVC-ABCD1234",
+            "target": "10.244.1.10:80"
+          }
+        ]
+      },
+      "INPUT": {
+        "default_policy": "ACCEPT",
+        "rules": []
+      },
+      "OUTPUT": {
+        "default_policy": "ACCEPT",
+        "rules": [
+          {
+            "rule_id": "1",
+            "match_conditions": {
+              "source_ip": null,
+              "destination_ip": "10.96.0.10",
+              "protocol": "tcp",
+              "source_port": null,
+              "destination_port": 80,
+              "in_interface": null,
+              "out_interface": null,
+              "state": null
+            },
+            "action": "DNAT",
+            "jump_chain": "KUBE-SVC-ABCD1234",
+            "target": "10.244.1.10:80"
+          }
+        ]
+      },
+      "POSTROUTING": {
+        "default_policy": "ACCEPT",
+        "rules": [
+          {
+            "rule_id": "1",
+            "match_conditions": {
+              "source_ip": "10.244.0.0/16",
+              "destination_ip": "10.244.0.0/16",
+              "protocol": null,
+              "source_port": null,
+              "destination_port": null,
+              "in_interface": null,
+              "out_interface": null,
+              "state": null
+            },
+            "action": "MASQUERADE",
+            "jump_chain": null,
+            "target": null
+          }
+        ]
+      },
+      "KUBE-SVC-ABCD1234": {
+        "default_policy": "RETURN",
+        "rules": [
+          {
+            "rule_id": "1",
+            "match_conditions": {
+              "source_ip": null,
+              "destination_ip": null,
+              "protocol": "tcp",
+              "source_port": null,
+              "destination_port": 80,
+              "in_interface": null,
+              "out_interface": null,
+              "state": null
+            },
+            "action": "DNAT",
+            "jump_chain": "KUBE-SEP-DEFG5678",
+            "target": "10.244.1.10:80"
+          }
+        ]
+      },
+      "KUBE-SEP-DEFG5678": {
+        "default_policy": "RETURN",
+        "rules": [
+          {
+            "rule_id": "1",
+            "match_conditions": {
+              "source_ip": null,
+              "destination_ip": null,
+              "protocol": "tcp",
+              "source_port": null,
+              "destination_port": 80,
+              "in_interface": null,
+              "out_interface": null,
+              "state": null
+            },
+            "action": "DNAT",
+            "jump_chain": null,
+            "target": "10.244.1.10:80"
+          }
+        ]
+      }
+    },
+    "filter": {
+      "INPUT": {
+        "default_policy": "DROP",
+        "rules": [
+          {
+            "rule_id": "1",
+            "match_conditions": {
+              "source_ip": null,
+              "destination_ip": null,
+              "protocol": "tcp",
+              "source_port": null,
+              "destination_port": 22,
+              "in_interface": null,
+              "out_interface": null,
+              "state": null
+            },
+            "action": "ACCEPT",
+            "jump_chain": null,
+            "target": null
+          },
+          {
+            "rule_id": "2",
+            "match_conditions": {
+              "source_ip": "10.244.0.0/16",
+              "destination_ip": null,
+              "protocol": "tcp",
+              "source_port": null,
+              "destination_port": 80,
+              "in_interface": null,
+              "out_interface": null,
+              "state": null
+            },
+            "action": "ACCEPT",
+            "jump_chain": null,
+            "target": null
+          },
+          {
+            "rule_id": "3",
+            "match_conditions": {
+              "source_ip": null,
+              "destination_ip": null,
+              "protocol": "tcp",
+              "source_port": null,
+              "destination_port": 80,
+              "in_interface": null,
+              "out_interface": null,
+              "state": null
+            },
+            "action": "ACCEPT",
+            "jump_chain": null,
+            "target": null
+          }
+        ]
+      },
+      "FORWARD": {
+        "default_policy": "DROP",
+        "rules": [
+          {
+            "rule_id": "1",
+            "match_conditions": {
+              "source_ip": "10.244.0.0/16",
+              "destination_ip": "10.244.0.0/16",
+              "protocol": null,
+              "source_port": null,
+              "destination_port": null,
+              "in_interface": null,
+              "out_interface": null,
+              "state": null
+            },
+            "action": "ACCEPT",
+            "jump_chain": null,
+            "target": null
+          }
+        ]
+      },
+      "OUTPUT": {
+        "default_policy": "ACCEPT",
+        "rules": [
+          {
+            "rule_id": "1",
+            "match_conditions": {
+              "source_ip": null,
+              "destination_ip": null,
+              "protocol": "tcp",
+              "source_port": null,
+              "destination_port": 80,
+              "in_interface": null,
+              "out_interface": null,
+              "state": null
+            },
+            "action": "ACCEPT",
+            "jump_chain": null,
+            "target": null
+          }
+        ]
+      }
+    }
+  },
+  "ipvs_rules": {
+    "virtual_services": [
+      {
+        "vs_id": "1",
+        "ip": "10.96.0.10",
+        "port": 80,
+        "protocol": "tcp",
+        "scheduler": "rr",
+        "real_servers": [
+          {
+            "rs_id": "1-1",
+            "ip": "10.244.1.10",
+            "port": 80,
+            "weight": 1
+          },
+          {
+            "rs_id": "1-2",
+            "ip": "10.244.1.11",
+            "port": 80,
+            "weight": 1
+          }
+        ]
+      },
+      {
+        "vs_id": "2",
+        "ip": "10.96.0.1",
+        "port": 443,
+        "protocol": "tcp",
+        "scheduler": "rr",
+        "real_servers": [
+          {
+            "rs_id": "2-1",
+            "ip": "192.168.1.100",
+            "port": 6443,
+            "weight": 1
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+##### 5.1.2 JSON格式特点与优势
+
+**结构特点**：
+1. **统一的匹配条件结构**：所有规则都使用相同的`match_conditions`字段结构
+2. **null值表示未设置**：使用`null`表示未设置的匹配条件，便于程序判断
+3. **数据类型统一**：端口使用数字类型，IP使用字符串类型
+4. **完整的匹配条件支持**：包含源IP、目标IP、协议、源端口、目标端口、接口、状态等
+
+**程序友好性**：
+1. **易于遍历**：层次分明的结构便于程序遍历和查找
+2. **高效匹配**：统一的字段结构便于实现高效的匹配算法
+3. **易于扩展**：可以轻松添加新的匹配条件类型
+4. **支持复杂场景**：支持CIDR网段、端口范围、自定义链等
+
+**匹配条件字段说明**：
+- `source_ip`/`destination_ip`：支持CIDR格式（如"10.244.0.0/16"）
+- `protocol`：协议类型（tcp/udp/icmp等）
+- `source_port`/`destination_port`：端口号（数字类型）
+- `in_interface`/`out_interface`：接口名称（为扩展预留）
+- `state`：连接状态（为扩展预留）
+
+##### 5.1.3 Python数据模型
 ```python
 # src/models/rule_models.py
 # 功能：定义iptables和ipvs规则的数据结构
-# 特点：使用dataclass简化代码，支持JSON序列化，包含K8s资源关联
+# 特点：使用dataclass简化代码，支持JSON序列化，与JSON格式完全对应
 from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
 
 @dataclass
-class IptablesRule:
-    table: str
-    chain: str
+class MatchConditions:
+    """匹配条件数据类，与JSON格式完全对应"""
     source_ip: Optional[str] = None
     destination_ip: Optional[str] = None
     protocol: Optional[str] = None
-    source_port: Optional[str] = None
-    destination_port: Optional[str] = None
-    action: str = "ACCEPT"
-    jump_chain: Optional[str] = None
-    k8s_resource: Optional[Dict[str, Any]] = None
+    source_port: Optional[int] = None
+    destination_port: Optional[int] = None
+    in_interface: Optional[str] = None
+    out_interface: Optional[str] = None
+    state: Optional[str] = None
 
 @dataclass
-class VirtualService:
-    ip: str
-    port: str
-    protocol: str
-    scheduler: str
+class IptablesRule:
+    """iptables规则数据类"""
+    rule_id: str
+    match_conditions: MatchConditions
+    action: str
+    jump_chain: Optional[str] = None
+    target: Optional[str] = None
+
+@dataclass
+class ChainData:
+    """链数据类"""
+    default_policy: str
+    rules: List[IptablesRule]
+
+@dataclass
+class TableData:
+    """表数据类"""
+    PREROUTING: ChainData
+    INPUT: ChainData
+    FORWARD: ChainData
+    OUTPUT: ChainData
+    POSTROUTING: ChainData
 
 @dataclass
 class RealServer:
+    """ipvs真实服务器数据类"""
+    rs_id: str
     ip: str
-    port: str
-    weight: str
+    port: int
+    weight: int
 
 @dataclass
-class IpvsRule:
-    virtual_service: VirtualService
+class VirtualService:
+    """ipvs虚拟服务数据类"""
+    vs_id: str
+    ip: str
+    port: int
+    protocol: str
+    scheduler: str
     real_servers: List[RealServer]
 
 @dataclass
 class RuleSet:
-    iptables_rules: List[IptablesRule] = None
-    ipvs_rules: List[IpvsRule] = None
+    """规则集数据类"""
+    metadata: Dict[str, Any]
+    iptables_rules: Dict[str, TableData]
+    ipvs_rules: Dict[str, List[VirtualService]]
     
     def to_dict(self) -> dict:
         """转换为字典格式，便于JSON序列化"""
         return {
-            'iptables_rules': [rule.__dict__ for rule in (self.iptables_rules or [])],
-            'ipvs_rules': [rule.__dict__ for rule in (self.ipvs_rules or [])]
+            'metadata': self.metadata,
+            'iptables_rules': {
+                table_name: {
+                    chain_name: {
+                        'default_policy': chain_data.default_policy,
+                        'rules': [
+                            {
+                                'rule_id': rule.rule_id,
+                                'match_conditions': {
+                                    'source_ip': rule.match_conditions.source_ip,
+                                    'destination_ip': rule.match_conditions.destination_ip,
+                                    'protocol': rule.match_conditions.protocol,
+                                    'source_port': rule.match_conditions.source_port,
+                                    'destination_port': rule.match_conditions.destination_port,
+                                    'in_interface': rule.match_conditions.in_interface,
+                                    'out_interface': rule.match_conditions.out_interface,
+                                    'state': rule.match_conditions.state
+                                },
+                                'action': rule.action,
+                                'jump_chain': rule.jump_chain,
+                                'target': rule.target
+                            } for rule in chain_data.rules
+                        ]
+                    } for chain_name, chain_data in table_data.__dict__.items()
+                } for table_name, table_data in self.iptables_rules.items()
+            },
+            'ipvs_rules': {
+                'virtual_services': [
+                    {
+                        'vs_id': vs.vs_id,
+                        'ip': vs.ip,
+                        'port': vs.port,
+                        'protocol': vs.protocol,
+                        'scheduler': vs.scheduler,
+                        'real_servers': [
+                            {
+                                'rs_id': rs.rs_id,
+                                'ip': rs.ip,
+                                'port': rs.port,
+                                'weight': rs.weight
+                            } for rs in vs.real_servers
+                        ]
+                    } for vs in self.ipvs_rules['virtual_services']
+                ]
+            }
         }
     
     @classmethod
     def from_dict(cls, data: dict) -> 'RuleSet':
         """从字典创建RuleSet对象"""
-        iptables_rules = [IptablesRule(**rule) for rule in data.get('iptables_rules', [])]
-        ipvs_rules = [IpvsRule(**rule) for rule in data.get('ipvs_rules', [])]
-        return cls(iptables_rules=iptables_rules, ipvs_rules=ipvs_rules)
+        # 实现从JSON数据构建RuleSet对象的逻辑
+        pass
+```
+
+##### 5.1.4 JSON格式验证与使用示例
+
+**格式验证**：
+```python
+def validate_json_format(json_data: dict) -> bool:
+    """验证JSON格式是否符合规范"""
+    required_keys = ['metadata', 'iptables_rules', 'ipvs_rules']
+    
+    # 检查必需字段
+    if not all(key in json_data for key in required_keys):
+        return False
+    
+    # 检查iptables_rules结构
+    iptables_rules = json_data['iptables_rules']
+    required_tables = ['raw', 'mangle', 'nat', 'filter']
+    required_chains = ['PREROUTING', 'INPUT', 'FORWARD', 'OUTPUT', 'POSTROUTING']
+    
+    for table_name in required_tables:
+        if table_name not in iptables_rules:
+            return False
+        
+        table = iptables_rules[table_name]
+        for chain_name in required_chains:
+            if chain_name not in table:
+                continue  # 某些表可能没有所有链
+            
+            chain = table[chain_name]
+            if 'default_policy' not in chain or 'rules' not in chain:
+                return False
+            
+            # 验证规则结构
+            for rule in chain['rules']:
+                if not validate_rule_structure(rule):
+                    return False
+    
+    return True
+
+def validate_rule_structure(rule: dict) -> bool:
+    """验证单个规则的结构"""
+    required_fields = ['rule_id', 'match_conditions', 'action']
+    if not all(field in rule for field in required_fields):
+        return False
+    
+    # 验证匹配条件结构
+    conditions = rule['match_conditions']
+    required_conditions = [
+        'source_ip', 'destination_ip', 'protocol', 'source_port',
+        'destination_port', 'in_interface', 'out_interface', 'state'
+    ]
+    
+    return all(condition in conditions for condition in required_conditions)
+```
+
+**使用示例**：
+```python
+def load_and_validate_rules(json_file: str) -> RuleSet:
+    """加载并验证规则JSON文件"""
+    with open(json_file, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    if not validate_json_format(data):
+        raise ValueError("JSON格式不符合规范")
+    
+    return RuleSet.from_dict(data)
+
+def match_traffic_example():
+    """流量匹配示例"""
+    # 加载规则
+    ruleset = load_and_validate_rules('rules.json')
+    
+    # 创建流量请求
+    request = TrafficRequest(
+        src_ip="192.168.1.10",
+        dst_ip="10.96.0.10",
+        dst_port=80,
+        protocol="tcp",
+        direction="outbound"
+    )
+    
+    # 按表优先级匹配
+    matching_engine = MatchingEngine()
+    for table_name in ['raw', 'mangle', 'nat', 'filter']:
+        table = ruleset.iptables_rules[table_name]
+        chain_name = get_chain_for_direction(request.direction)
+        
+        if chain_name in table:
+            chain = table[chain_name]
+            for rule in chain['rules']:
+                if matching_engine.match_rule(rule, request):
+                    print(f"匹配到规则: {rule['rule_id']} 在表 {table_name} 链 {chain_name}")
+                    return rule['action']
+            
+            # 执行默认策略
+            print(f"未匹配任何规则，执行默认策略: {chain['default_policy']}")
+            return chain['default_policy']
+    
+    return "ACCEPT"
 ```
 
 #### 5.2 流量模型
@@ -1009,52 +1519,402 @@ warn_unused_configs = true
 
 ## 开发建议
 
-### 1. 开发顺序
-1. **第1周**：使用uv初始化项目，搭建单文件项目结构，实现基础模型
-2. **第2-3周**：实现iptables解析功能
-3. **第4-5周**：实现流量模拟功能
-4. **第6-7周**：实现CLI接口和报告生成
-5. **第8周**：集成测试和打包成单文件可执行程序
+### 1. 详细开发顺序
 
-### 2. 测试策略
-- **单元测试**：每个模块独立测试
-- **集成测试**：模块间协作测试
-- **端到端测试**：完整流程测试
+#### 第1周：项目初始化与CLI框架搭建
 
-### 3. 代码质量
-- 使用类型提示
-- 遵循PEP 8规范
-- 编写清晰的文档字符串
-- 保持函数简洁
+**第1-2天：环境准备**
+```bash
+# 1. 安装uv（如果未安装）
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.bashrc
 
-### 4. 性能优化
-- 优化数据结构选择
-- 避免不必要的循环
-- 使用生成器处理大数据
-- 合理使用JSON文件存储和读取
+# 2. 创建项目目录
+mkdir iptables-ipvs-analyzer
+cd iptables-ipvs-analyzer
 
-### 5. 依赖管理
-- 使用uv管理项目依赖，比pip更快更可靠
-- 支持虚拟环境自动创建和管理
-- 支持依赖锁定和版本管理
+# 3. 初始化uv项目
+uv init --python 3.11
 
-### 6. 单文件打包
-- 使用PyInstaller或cx_Freeze打包成单文件可执行程序
-- 包含所有依赖，无需安装Python环境
-- 支持Linux系统直接运行
+# 4. 添加核心依赖
+uv add python-iptables typer jinja2 graphviz
+uv add --dev pytest black flake8 mypy ruff
+```
 
-## 单文件工具实现示例
+**第3-4天：项目结构搭建**
+```bash
+# 创建目录结构
+mkdir -p src/{interfaces/cli,services,demo,data_access,core,models,infrastructure,utils}
+mkdir -p tests/{unit,fixtures}
+mkdir -p templates/{html,markdown}
+mkdir -p config
 
-### 主程序结构
+# 创建基础文件
+touch src/__init__.py
+touch src/interfaces/__init__.py
+touch src/services/__init__.py
+touch src/demo/__init__.py
+touch src/data_access/__init__.py
+touch src/core/__init__.py
+touch src/models/__init__.py
+touch src/infrastructure/__init__.py
+touch src/utils/__init__.py
+```
+
+**第5-7天：CLI框架搭建与基础模型**
+```python
+# 1. 实现CLI框架 (src/interfaces/cli/main.py)
+# - 使用Typer搭建CLI框架
+# - 实现四个命令：parse, demo, process, version
+# - 实现参数验证和帮助信息
+
+# 2. 实现数据模型 (src/models/)
+# - rule_models.py: 定义IptablesRule, IpvsRule, RuleSet等基础类
+# - traffic_models.py: 定义TrafficRequest, SimulationResult等流量相关类
+
+# 3. 实现基础设施 (src/infrastructure/)
+# - config.py: 配置管理
+# - logger.py: 日志服务
+# - error_handler.py: 异常处理
+
+# 4. 实现工具类 (src/utils/)
+# - ip_utils.py: IP地址处理工具
+# - format_utils.py: 格式化工具
+```
+
+#### 第2周：iptables解析功能开发
+
+**第1-2天：iptables数据访问层**
+```python
+# src/data_access/iptables_dao.py
+# 1. 实现IptablesDAO类
+# 2. 使用python-iptables库读取规则
+# 3. 实现基础规则解析逻辑
+# 4. 支持4个表（raw, mangle, nat, filter）的解析
+```
+
+**第3-4天：规则解析服务**
+```python
+# src/services/parser_service.py
+# 1. 实现ParserService类
+# 2. 整合IptablesDAO
+# 3. 实现规则标准化
+# 4. 支持JSON格式输出
+```
+
+**第5-7天：解析功能测试与优化**
+```python
+# tests/unit/test_parser.py
+# 1. 编写单元测试
+# 2. 测试各种iptables规则格式
+# 3. 性能优化
+# 4. 错误处理测试
+```
+
+#### 第3周：ipvs解析功能开发
+
+**第1-2天：ipvs数据访问层**
+```python
+# src/data_access/ipvs_dao.py
+# 1. 实现IpvsDAO类
+# 2. 使用ipvsadm命令获取规则
+# 3. 解析XML格式输出
+# 4. 提取虚拟服务和真实服务器信息
+```
+
+**第3-4天：ipvs解析集成**
+```python
+# src/services/parser_service.py
+# 1. 集成IpvsDAO
+# 2. 实现ipvs规则标准化
+# 3. 统一JSON格式输出
+```
+
+**第5-7天：解析功能完善**
+```python
+# 1. 完善错误处理
+# 2. 添加日志记录
+# 3. 性能测试
+# 4. 文档更新
+```
+
+#### 第4周：核心匹配算法开发
+
+**第1-2天：匹配引擎实现**
+```python
+# src/core/matching_engine.py
+# 1. 实现IP地址匹配（支持CIDR）
+# 2. 实现端口匹配
+# 3. 实现协议匹配
+# 4. 实现接口匹配（预留）
+# 5. 实现状态匹配（预留）
+```
+
+**第3-4天：表处理器实现**
+```python
+# src/core/table_processor.py
+# 1. 实现表优先级处理
+# 2. 实现链选择逻辑
+# 3. 实现跳转链处理
+# 4. 实现默认策略处理
+```
+
+**第5-7天：匹配算法测试**
+```python
+# tests/unit/test_matching.py
+# 1. 测试各种匹配场景
+# 2. 测试边界条件
+# 3. 性能测试
+# 4. 集成测试
+```
+
+#### 第5周：命令行演示功能开发
+
+**第1-2天：命令行演示功能**
+```python
+# src/demo/cli_demo.py
+# 1. 实现CLIDemo类
+# 2. 集成匹配引擎
+# 3. 实现文本和JSON输出
+# 4. 实现详细的匹配路径展示
+```
+
+**第3-4天：CLI功能完善**
+```python
+# src/interfaces/cli/main.py
+# 1. 完善parse命令实现
+# 2. 完善demo命令实现
+# 3. 完善process命令实现
+# 4. 添加version命令
+```
+
+**第5-7天：CLI功能测试**
+```python
+# tests/unit/test_cli.py
+# 1. 测试各个命令
+# 2. 测试参数验证
+# 3. 测试错误处理
+# 4. 用户体验优化
+```
+
+#### 第6周：规则处理功能开发
+
+**第1-2天：K8s客户端实现**
+```python
+# src/data_access/k8s_client.py
+# 1. 实现K8sClient类
+# 2. 连接Kubernetes API
+# 3. 获取Service和Endpoint信息
+# 4. 实现资源关联逻辑
+```
+
+**第3-4天：规则处理服务**
+```python
+# src/services/processor_service.py
+# 1. 实现ProcessorService类
+# 2. 实现K8s服务关联
+# 3. 实现报告生成
+# 4. 实现规则分析
+```
+
+**第5-7天：处理功能测试**
+```python
+# tests/unit/test_processor.py
+# 1. 测试K8s关联功能
+# 2. 测试报告生成
+# 3. 测试错误处理
+# 4. 集成测试
+```
+
+#### 第7周：集成测试与打包
+
+**第1-2天：集成测试**
+```python
+# tests/integration/
+# 1. 端到端测试
+# 2. 性能测试
+# 3. 兼容性测试
+# 4. 用户场景测试
+```
+
+**第3-4天：报告生成功能**
+```python
+# src/core/report_generator.py
+# 1. 实现HTML报告生成
+# 2. 实现Markdown报告生成
+# 3. 集成图表生成
+# 4. 模板系统完善
+```
+
+**第5-7天：打包与发布**
+```python
+# build.py
+# 1. 实现单文件打包
+# 2. 测试打包结果
+# 3. 创建发布包
+# 4. 文档完善
+```
+
+#### 第8周：Web演示功能开发（v2.0版本）
+
+**第1-2天：Web页面生成器**
+```python
+# src/demo/web_demo/web_generator.py
+# 1. 实现WebDemoGenerator类
+# 2. 使用Jinja2模板引擎
+# 3. 生成静态HTML页面
+# 4. 嵌入规则数据
+```
+
+**第3-4天：前端JavaScript实现**
+```javascript
+// src/demo/web_demo/static/js/
+// 1. rule-matcher.js: 前端匹配逻辑
+// 2. ip-utils.js: IP地址处理
+// 3. ui-handler.js: 界面交互
+// 4. filter-engine.js: 结果过滤
+```
+
+**第5-7天：Web功能完善**
+```css
+/* src/demo/web_demo/static/css/style.css */
+/* 1. 响应式设计
+   2. 美观的界面
+   3. 交互效果
+   4. 结果展示优化 */
+```
+
+#### 开发依赖关系图
+
+```
+数据模型层 (第1周)
+    ↓
+CLI框架层 (第1周) ←→ 数据模型层 (第1周)
+    ↓
+数据访问层 (第2-3周)
+    ↓
+核心算法层 (第4周)
+    ↓
+服务层 (第2-3周) ←→ 核心算法层 (第4周)
+    ↓
+命令行演示层 (第5周) ←→ CLI框架层 (第1周)
+    ↓
+规则处理层 (第6周)
+    ↓
+集成测试 (第7周)
+    ↓
+Web演示层 (第8周 - v2.0版本)
+```
+
+#### 关键里程碑检查点
+
+**第1周末检查点**：
+- [ ] 项目结构搭建完成
+- [ ] CLI框架搭建完成
+- [ ] 基础模型实现完成
+- [ ] 配置和日志系统可用
+- [ ] 基础测试框架搭建完成
+
+**第2周末检查点**：
+- [ ] iptables规则解析功能可用
+- [ ] 能够生成标准JSON格式
+- [ ] 基础单元测试通过
+- [ ] 错误处理机制完善
+
+**第3周末检查点**：
+- [ ] ipvs规则解析功能可用
+- [ ] 完整规则解析服务可用
+- [ ] 性能测试通过
+- [ ] 文档更新完成
+
+**第4周末检查点**：
+- [ ] 匹配算法实现完成
+- [ ] 表处理器功能可用
+- [ ] 匹配测试通过
+- [ ] 性能优化完成
+
+**第5周末检查点**：
+- [ ] 命令行演示功能完整
+- [ ] CLI命令实现完成
+- [ ] 用户体验良好
+- [ ] 参数验证完善
+
+**第6周末检查点**：
+- [ ] K8s关联功能可用
+- [ ] 规则处理服务完整
+- [ ] 报告生成功能可用
+- [ ] 集成测试通过
+
+**第7周末检查点**：
+- [ ] 单文件打包成功
+- [ ] 端到端测试通过
+- [ ] 性能指标达标
+- [ ] v1.0版本发布准备完成
+
+**第8周末检查点**（v2.0版本）：
+- [ ] Web演示页面可用
+- [ ] 前端匹配逻辑正确
+- [ ] 界面美观易用
+- [ ] 文件上传功能正常
+
+#### 风险控制与备选方案
+
+**技术风险**：
+- 如果python-iptables库有问题，使用iptables-save命令解析
+- 如果ipvsadm命令不可用，跳过ipvs功能
+- 如果K8s连接失败，提供离线模式
+
+**时间风险**：
+- 如果某个模块开发超时，优先保证核心功能
+- 如果Web功能复杂，先实现基础版本
+- 如果K8s功能复杂，可以后续迭代
+
+**质量风险**：
+- 每个模块完成后立即测试
+- 关键功能必须有单元测试
+- 定期进行代码审查
+
+### 2. 开发工具链与最佳实践
+
+#### 2.1 代码质量保证
+- **类型提示**：使用Python 3.11的类型系统，提高代码可读性和IDE支持
+- **代码规范**：遵循PEP 8规范，使用black自动格式化
+- **代码检查**：使用ruff进行快速代码检查，mypy进行类型检查
+- **文档字符串**：为所有公共函数和类编写清晰的文档字符串
+
+#### 2.2 测试策略
+- **单元测试**：每个模块独立测试，使用pytest框架
+- **集成测试**：模块间协作测试，验证数据流
+- **端到端测试**：完整流程测试，模拟真实使用场景
+- **测试覆盖率**：目标覆盖率 > 80%
+
+#### 2.3 性能优化
+- **数据结构优化**：选择合适的数据结构，避免不必要的内存分配
+- **并行处理**：使用concurrent.futures进行并行解析
+- **生成器模式**：使用生成器处理大量规则，节省内存
+- **缓存机制**：对重复解析的规则进行缓存
+
+#### 2.4 依赖管理
+- **uv工具**：使用uv管理项目依赖，比pip快10-100倍
+- **虚拟环境**：自动创建和管理Python虚拟环境
+- **依赖锁定**：使用uv.lock文件确保依赖版本一致性
+- **开发依赖**：分离生产依赖和开发依赖
+
+---
+
+## 单文件工具实现与打包
+
+### 1. 单文件工具架构
+
+#### 1.1 主程序结构
 ```python
 #!/usr/bin/env python3.11
 # -*- coding: utf-8 -*-
 """
 iptables/ipvs 数据包流向分析工具
 单文件版本 - 所有功能集成在一个可执行文件中
-功能：提供三大核心功能 - 规则解析、流量演示、规则处理
+功能：提供四大核心功能 - 规则解析、流量演示、Web演示、规则处理
 特点：单文件部署，无需Python环境，支持Linux系统直接运行
-Python 3.11+ 要求
 """
 
 import sys
@@ -1062,9 +1922,6 @@ import json
 import typer
 from pathlib import Path
 from typing import Optional, Literal
-
-# 所有模块都集成在同一个文件中
-# 或者使用相对导入（如果保持模块化结构）
 
 def main():
     """主程序入口"""
@@ -1079,9 +1936,7 @@ def main():
         include_ipvs: bool = typer.Option(True, "--include-ipvs/--no-include-ipvs"),
         table: Optional[str] = typer.Option(None, "--table", "-t")
     ):
-        """解析iptables/ipvs规则并保存到JSON文件
-        功能：从系统获取防火墙和负载均衡规则，转换为标准JSON格式
-        """
+        """解析iptables/ipvs规则并保存到JSON文件"""
         # 实现解析逻辑
         pass
     
@@ -1095,9 +1950,7 @@ def main():
         direction: Literal["inbound", "outbound", "forward"] = typer.Argument(..., help="流量方向"),
         output_format: Literal["text", "json"] = typer.Option("text", "--format", "-f")
     ):
-        """命令行演示流量匹配过程
-        功能：使用指定参数演示数据包通过iptables/ipvs规则的匹配过程
-        """
+        """命令行演示流量匹配过程"""
         # 实现演示逻辑
         pass
     
@@ -1106,9 +1959,7 @@ def main():
         output_file: Path = typer.Option("./demo.html", "--output", "-o", help="输出HTML文件路径"),
         default_rules: Path = typer.Option(None, "--default-rules", help="默认规则JSON文件路径（可选）")
     ):
-        """生成Web交互式演示页面
-        功能：生成支持文件上传的交互式静态网页，用户可上传JSON文件作为数据源并设置参数查看匹配结果
-        """
+        """生成Web交互式演示页面"""
         # 实现Web演示逻辑
         pass
     
@@ -1118,9 +1969,7 @@ def main():
         matched_rules: str = typer.Argument(..., help="匹配到的规则ID列表，用逗号分隔"),
         action: Literal["k8s-service", "report"] = typer.Argument(..., help="处理动作")
     ):
-        """处理匹配到的规则（如关联K8s服务）
-        功能：根据匹配结果进行后续处理，当前支持K8s服务关联
-        """
+        """处理匹配到的规则（如关联K8s服务）"""
         # 实现处理逻辑
         pass
     
@@ -1130,20 +1979,15 @@ if __name__ == "__main__":
     main()
 ```
 
-### 打包配置
+#### 1.2 打包配置
 ```python
 # build.py - 单文件打包脚本
-# 功能：使用PyInstaller将Python项目打包成单文件可执行程序
-# 特点：集成uv环境管理，自动处理依赖，支持资源文件打包
 import PyInstaller.__main__
 import subprocess
 import sys
 
 def build():
-    """使用uv环境打包单文件
-    功能：检查uv环境，安装依赖，使用PyInstaller生成单文件可执行程序
-    特点：自动处理隐藏导入，包含配置和模板文件，支持清理构建
-    """
+    """使用uv环境打包单文件"""
     # 确保在uv虚拟环境中
     try:
         subprocess.run(['uv', '--version'], check=True, capture_output=True)
@@ -1173,51 +2017,239 @@ if __name__ == "__main__":
     build()
 ```
 
-### uv使用命令
-```bash
-# 初始化项目（指定Python 3.11）
-uv init iptables-ipvs-analyzer --python 3.11
-cd iptables-ipvs-analyzer
+### 2. 技术选型优势
 
-# 添加依赖
-uv add python-iptables typer jinja2 graphviz
-uv add --dev pytest black flake8 mypy ruff
-
-# 安装依赖
-uv sync
-
-# 运行项目 - 四大核心功能
-# 1. 解析规则
-uv run python src/interfaces/cli/main.py parse --output rules.json
-
-# 2. 命令行演示流量匹配
-uv run python src/interfaces/cli/main.py demo rules.json 192.168.1.10 10.96.0.10 80 tcp outbound
-
-# 3. 生成Web交互式演示页面
-uv run python src/interfaces/cli/main.py web_demo --output demo.html
-# 或者带默认规则文件
-uv run python src/interfaces/cli/main.py web_demo --output demo.html --default-rules rules.json
-# 生成 demo.html 文件，用浏览器打开即可上传JSON文件并交互式设置参数查看匹配结果
-
-# 4. 处理匹配结果
-uv run python src/interfaces/cli/main.py process rules.json "rule1,rule2,rule3" k8s-service
-
-# 打包单文件
-uv run python build.py
-```
-
-这个简化后的架构设计为您的个人开发项目提供了一个清晰、可维护的结构，专注于单文件工具的实现，使用uv进行高效的依赖管理，避免了复杂的部署和容器化配置。架构既保证了功能的完整性，又充分考虑了个人开发的实际情况，便于快速开发和迭代。
-
-### uv的优势
+#### 2.1 uv工具优势
 - **速度更快**：比pip快10-100倍
 - **依赖解析**：更智能的依赖冲突解决
 - **虚拟环境**：自动创建和管理
 - **锁定文件**：确保依赖版本一致性
 - **现代工具**：支持最新的Python包管理标准
 
-### Python 3.11的优势
+#### 2.2 Python 3.11优势
 - **性能提升**：比Python 3.8快10-60%
 - **新语法特性**：支持更现代的Python语法
 - **类型系统**：更好的类型提示支持
 - **错误信息**：更清晰的错误提示和调试信息
 - **标准库**：更多内置功能和优化
+
+---
+
+## 个人开发补充指南
+
+### 1. 开发环境搭建
+
+#### 1.1 系统要求
+- **操作系统**：Linux (Ubuntu 20.04+, CentOS 7+, Rocky Linux 8+)
+- **Python版本**：3.11+
+- **权限要求**：需要root权限读取iptables/ipvs规则
+- **依赖工具**：iptables, ipvsadm
+
+#### 1.2 快速开始
+```bash
+# 1. 安装uv（如果未安装）
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.bashrc
+
+# 2. 克隆项目
+git clone <your-repo-url> iptables-ipvs-analyzer
+cd iptables-ipvs-analyzer
+
+# 3. 初始化项目环境
+uv init --python 3.11
+uv add python-iptables typer jinja2 graphviz
+uv add --dev pytest black flake8 mypy ruff
+
+# 4. 安装依赖
+uv sync
+
+# 5. 运行测试
+uv run pytest tests/
+
+# 6. 开始开发
+uv run python src/interfaces/cli/main.py --help
+```
+
+### 2. 开发工作流
+
+#### 2.1 日常开发流程
+```bash
+# 1. 创建功能分支
+git checkout -b feature/iptables-parser
+
+# 2. 开发功能
+# 编辑代码...
+
+# 3. 运行测试
+uv run pytest tests/unit/test_parser.py -v
+
+# 4. 代码格式化
+uv run black src/
+uv run ruff check src/
+
+# 5. 类型检查
+uv run mypy src/
+
+# 6. 提交代码
+git add .
+git commit -m "feat: 实现iptables规则解析功能"
+
+# 7. 推送分支
+git push origin feature/iptables-parser
+```
+
+### 3. 错误处理与调试
+
+#### 3.1 常见错误处理
+```python
+# src/infrastructure/error_handler.py
+class IptablesAnalyzerError(Exception):
+    """工具基础异常类"""
+    pass
+
+class ParseError(IptablesAnalyzerError):
+    """规则解析错误"""
+    pass
+
+class MatchError(IptablesAnalyzerError):
+    """规则匹配错误"""
+    pass
+
+class ValidationError(IptablesAnalyzerError):
+    """数据验证错误"""
+    pass
+
+def handle_parse_error(func):
+    """解析错误装饰器"""
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"解析失败: {e}")
+            raise ParseError(f"规则解析失败: {e}")
+    return wrapper
+```
+
+#### 3.2 调试技巧
+```python
+# 1. 使用日志调试
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
+# 2. 使用pdb调试
+import pdb; pdb.set_trace()
+
+# 3. 使用typer的调试模式
+typer.run(main, prog_name="iptables-analyzer --debug")
+
+# 4. 验证JSON格式
+def validate_json_file(file_path: str) -> bool:
+    """验证JSON文件格式"""
+    try:
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+        return validate_json_format(data)
+    except Exception as e:
+        print(f"JSON文件格式错误: {e}")
+        return False
+```
+
+### 4. 部署与分发
+
+#### 4.1 单文件打包
+```bash
+# 使用PyInstaller打包
+uv run python build.py
+
+# 生成的文件
+./dist/iptables-analyzer
+
+# 测试打包结果
+./dist/iptables-analyzer --help
+./dist/iptables-analyzer parse --output test.json
+```
+
+#### 4.2 发布准备
+```bash
+# 1. 更新版本号
+# 编辑 pyproject.toml 中的 version
+
+# 2. 生成变更日志
+git log --oneline v1.0.0..HEAD > CHANGELOG.md
+
+# 3. 创建发布标签
+git tag -a v1.0.0 -m "Release version 1.0.0"
+git push origin v1.0.0
+
+# 4. 构建发布包
+uv run python build.py
+```
+
+### 5. 持续集成（可选）
+
+#### 5.1 GitHub Actions配置
+```yaml
+# .github/workflows/ci.yml
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install uv
+      run: curl -LsSf https://astral.sh/uv/install.sh | sh
+    
+    - name: Install dependencies
+      run: uv sync
+    
+    - name: Run tests
+      run: uv run pytest tests/
+    
+    - name: Run linting
+      run: uv run ruff check src/
+    
+    - name: Run type checking
+      run: uv run mypy src/
+```
+
+### 6. 开发最佳实践
+
+#### 6.1 代码规范
+- 使用类型提示
+- 遵循PEP 8规范
+- 编写清晰的文档字符串
+- 保持函数简洁（<50行）
+- 使用有意义的变量名
+
+#### 6.2 测试规范
+- 每个功能都要有对应的测试
+- 测试覆盖率 > 80%
+- 使用fixture提供测试数据
+- 测试异常情况
+
+#### 6.3 Git规范
+```bash
+# 提交信息格式
+feat: 新功能
+fix: 修复bug
+docs: 文档更新
+test: 测试相关
+refactor: 重构代码
+style: 代码格式调整
+
+# 分支命名
+feature/功能名称
+bugfix/问题描述
+hotfix/紧急修复
+```
+
+这个补充指南为个人开发提供了完整的开发、测试、部署和维护流程，确保项目能够顺利开发和发布。
