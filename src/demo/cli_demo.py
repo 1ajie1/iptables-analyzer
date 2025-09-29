@@ -378,37 +378,14 @@ class CLIDemo:
         output_lines.append(f"🎯 最终决策: {decision_icon} {final_decision}")
         output_lines.append("")
         
-        # 匹配引擎结果
+        # 匹配引擎结果 - 只保留执行路径
         if "matching_engine_result" in demo_result:
             engine_result = demo_result["matching_engine_result"]
-            output_lines.append("🔍 匹配引擎分析:")
-            output_lines.append(f"  匹配规则: {engine_result['matched_rules_count']} 条")
-            output_lines.append(f"  链遍历: {engine_result['chain_traversals']} 次")
             
             # 详细执行路径
-            output_lines.append("  执行路径:")
+            output_lines.append("🔍 执行路径:")
             execution_path = engine_result.get('execution_path', [])
             self._format_execution_path(output_lines, execution_path)
-            
-            if verbose and engine_result.get('matched_rules'):
-                output_lines.append("  详细匹配规则:")
-                for i, rule in enumerate(engine_result['matched_rules'][:5]):  # 只显示前5条
-                    output_lines.append(f"    {i+1}. {rule['rule_id']} -> {rule['action']}")
-                    if rule.get('matched_conditions'):
-                        output_lines.append(f"       匹配条件: {', '.join(rule['matched_conditions'])}")
-            output_lines.append("")
-        
-        # 表处理器结果
-        if "table_processor_results" in demo_result and demo_result["table_processor_results"]:
-            output_lines.append("🔧 表处理器分析:")
-            for table_name, table_result in demo_result["table_processor_results"].items():
-                if "error" not in table_result:
-                    output_lines.append(f"  {table_name.upper()}表:")
-                    output_lines.append(f"    最终动作: {table_result['final_action']}")
-                    output_lines.append(f"    匹配规则: {table_result['matched_rules']} 条")
-                    output_lines.append(f"    处理阶段: {table_result['processing_phase']}")
-                else:
-                    output_lines.append(f"  {table_name.upper()}表: ❌ {table_result['error']}")
             output_lines.append("")
         
         # 性能指标
@@ -422,14 +399,6 @@ class CLIDemo:
             output_lines.append(f"  平均规则/包: {stats.get('performance_metrics', {}).get('avg_rules_per_packet', 0):.1f}")
         output_lines.append("")
         
-        # 建议
-        if demo_result["recommendations"]:
-            output_lines.append("💡 优化建议:")
-            for i, rec in enumerate(demo_result["recommendations"]):
-                priority_icon = "🔴" if rec["priority"] == "high" else "🟡" if rec["priority"] == "medium" else "🟢"
-                output_lines.append(f"  {i+1}. {priority_icon} {rec['title']}")
-                output_lines.append(f"     {rec['description']}")
-                output_lines.append(f"     建议: {rec['suggestion']}")
         
         return "\n".join(output_lines)
     

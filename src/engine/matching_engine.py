@@ -11,9 +11,12 @@ from enum import Enum
 
 from src.models.rule_models import IptablesRule, RuleSet
 from src.models.traffic_models import TrafficRequest, SimulationResult
+from src.models.nat_models import NATState, NATRule, NATType
+from src.engine.connection_manager import ConnectionManager
 from src.infrastructure.logger import logger
 from src.infrastructure.error_handler import handle_parse_error
 from src.utils.ip_utils import IPUtils
+from src.utils.error_handlers import  handle_nat_error, handle_connection_error
 
 
 class MatchResult(Enum):
@@ -48,17 +51,37 @@ class ChainTraversalInfo:
 class MatchingEngine:
     """匹配引擎"""
     
-    def __init__(self, strict_mode: bool = False, debug_mode: bool = False):
+    def __init__(self, strict_mode: bool = False, debug_mode: bool = False, 
+                 enable_prerouting: bool = True, enable_postrouting: bool = True,
+                 enable_nat: bool = True, connection_timeout: int = 300):
         """
         初始化匹配引擎
         
         Args:
             strict_mode: 严格模式，要求所有条件精确匹配
             debug_mode: 调试模式，输出详细匹配过程
+            enable_prerouting: 启用PREROUTING链处理
+            enable_postrouting: 启用POSTROUTING链处理
+            enable_nat: 启用NAT状态跟踪
+            connection_timeout: 连接超时时间（秒）
         """
         self.strict_mode = strict_mode
         self.debug_mode = debug_mode
+        self.enable_prerouting = enable_prerouting
+        self.enable_postrouting = enable_postrouting
+        self.enable_nat = enable_nat
+        self.connection_timeout = connection_timeout
         self.ip_utils = IPUtils()
+        
+        # 初始化NAT状态和连接管理
+        if self.enable_nat:
+            self.nat_state = NATState()
+            self.connection_manager = ConnectionManager(
+                default_timeout=connection_timeout
+            )
+        else:
+            self.nat_state = None
+            self.connection_manager = None
         
         # 匹配统计
         self.match_stats = {
@@ -66,10 +89,14 @@ class MatchingEngine:
             'total_rules_checked': 0,
             'total_matches': 0,
             'chain_traversals': 0,
-            'jumps_executed': 0
+            'jumps_executed': 0,
+            'nat_transformations': 0,
+            'connection_tracks': 0
         }
         
-        logger.info(f"匹配引擎初始化完成 (strict_mode={strict_mode}, debug_mode={debug_mode})")
+        logger.info(f"匹配引擎初始化完成 (strict_mode={strict_mode}, debug_mode={debug_mode}, "
+                   f"prerouting={enable_prerouting}, postrouting={enable_postrouting}, "
+                   f"nat={enable_nat}, connection_timeout={connection_timeout})")
     
     @handle_parse_error
     def simulate_packet(
@@ -104,14 +131,26 @@ class MatchingEngine:
         )
         
         try:
-            # 按照iptables表的正确顺序处理
-            table_order = self._get_table_order_for_direction(direction)
+            # 使用新的处理路径逻辑
+            processing_path = self._get_processing_path_for_direction(direction)
             
-            for table_name in table_order:
+            for table_name, chain_name in processing_path:
                 if table_name not in ruleset.iptables_rules:
+                    if self.debug_mode:
+                        logger.debug(f"跳过不存在的表: {table_name}")
                     continue
-                    
-                chain_name = self._get_chain_for_direction(direction)
+                
+                if chain_name not in ruleset.iptables_rules[table_name]:
+                    if self.debug_mode:
+                        logger.debug(f"跳过不存在的链: {table_name}.{chain_name}")
+                    continue
+                
+                # 应用NAT转换（在PREROUTING和POSTROUTING链中）
+                if self.enable_nat and chain_name in ["PREROUTING", "POSTROUTING"]:
+                    traffic_request = self._apply_nat_transformations(traffic_request, table_name, chain_name)
+                
+                # 跟踪连接状态
+                self._track_connection(traffic_request, table_name, chain_name)
                 
                 # 处理该表的链
                 if self.debug_mode:
@@ -121,18 +160,19 @@ class MatchingEngine:
                     ruleset, 
                     table_name, 
                     chain_name,
-                    simulation_result
+                    simulation_result,
+                    direction=direction
                 )
                 if self.debug_mode:
-                    logger.debug(f"{table_name}表处理完成，动作: {final_action}")
+                    logger.debug(f"{table_name}.{chain_name}处理完成，动作: {final_action}")
                 
                 # 构建该表的执行路径
                 self._build_table_execution_path(simulation_result, table_name)
                 
-                # 如果遇到终结动作，停止处理
-                if final_action in ['DROP', 'REJECT']:
+                # 根据链类型决定是否继续处理
+                if self._is_terminating_chain(chain_name, final_action, table_name):
                     simulation_result.final_action = final_action
-                    logger.info(f"数据包在{table_name}表被{final_action}")
+                    logger.info(f"数据包在{table_name}.{chain_name}被{final_action}")
                     return simulation_result
             
             simulation_result.final_action = "ACCEPT"
@@ -158,7 +198,8 @@ class MatchingEngine:
         table_name: str,
         chain_name: str,
         simulation_result: SimulationResult,
-        jump_history: Optional[List[str]] = None
+        jump_history: Optional[List[str]] = None,
+        direction: Optional[str] = None
     ) -> str:
         """
         遍历指定链中的规则
@@ -176,7 +217,7 @@ class MatchingEngine:
         """
         if jump_history is None:
             jump_history = []
-        
+
         # 防止无限循环
         current_chain_key = f"{table_name}.{chain_name}"
         if current_chain_key in jump_history:
@@ -243,14 +284,17 @@ class MatchingEngine:
                     self.match_stats['jumps_executed'] += 1
                     if self.debug_mode:
                         logger.debug(f"跳转到链: {match_info.jump_target}")
-                    jump_result = self._traverse_chain(
-                        traffic_request, 
-                        ruleset, 
-                        table_name, 
+                    
+                    jump_result = self._handle_chain_jump(
+                        traffic_request,
+                        ruleset,
+                        table_name,
                         match_info.jump_target,
                         simulation_result,
-                        jump_history
+                        jump_history,
+                        direction
                     )
+                    
                     if self.debug_mode:
                         logger.debug(f"跳转链 {match_info.jump_target} 返回: {jump_result}")
                     
@@ -279,7 +323,8 @@ class MatchingEngine:
                         table_name, 
                         match_info.jump_target,
                         simulation_result,
-                        jump_history
+                        jump_history,
+                        direction
                     )
                 
                 elif action == 'RETURN':
@@ -441,7 +486,7 @@ class MatchingEngine:
         
         # 检查连接状态
         if rule.match_conditions.state:
-            if self._match_state(traffic_request.state, rule.match_conditions.state):
+            if self._match_state(traffic_request.state, rule.match_conditions.state, traffic_request):
                 matched_conditions.append("state")
             else:
                 unmatched_conditions.append("state")
@@ -520,8 +565,58 @@ class MatchingEngine:
         
         return " ".join(details)
     
+    def _get_processing_path_for_direction(self, direction: str) -> List[tuple]:
+        """根据流量方向获取完整的处理路径（表名，链名）"""
+        if direction == "INPUT":
+            path = []
+            if self.enable_prerouting:
+                path.extend([
+                    ("raw", "PREROUTING"),
+                    ("mangle", "PREROUTING"),
+                    ("nat", "PREROUTING")
+                ])
+            path.extend([
+                ("mangle", "INPUT"),
+                ("filter", "INPUT")
+            ])
+            return path
+        elif direction == "OUTPUT":
+            path = [
+                ("raw", "OUTPUT"),
+                ("mangle", "OUTPUT"),
+                ("nat", "OUTPUT"),
+                ("filter", "OUTPUT")
+            ]
+            if self.enable_postrouting:
+                path.extend([
+                    ("mangle", "POSTROUTING"),
+                    ("nat", "POSTROUTING")
+                ])
+            return path
+        elif direction == "FORWARD":
+            path = []
+            if self.enable_prerouting:
+                path.extend([
+                    ("raw", "PREROUTING"),
+                    ("mangle", "PREROUTING"),
+                    ("nat", "PREROUTING")
+                ])
+            path.extend([
+                ("mangle", "FORWARD"),
+                ("filter", "FORWARD")
+            ])
+            if self.enable_postrouting:
+                path.extend([
+                    ("mangle", "POSTROUTING"),
+                    ("nat", "POSTROUTING")
+                ])
+            return path
+        else:
+            # 默认使用简化的INPUT处理
+            return [("filter", "INPUT")]
+
     def _get_table_order_for_direction(self, direction: str) -> List[str]:
-        """根据流量方向获取表的处理顺序"""
+        """根据流量方向获取表的处理顺序（向后兼容）"""
         if direction == "INPUT":
             return ["raw", "mangle", "nat", "filter"]
         elif direction == "OUTPUT":
@@ -542,12 +637,219 @@ class MatchingEngine:
         else:
             return "INPUT"
     
+    def _is_terminating_chain(self, chain_name: str, action: str, table_name: str = None) -> bool:
+        """判断是否为终结链"""
+        # 只有filter表中的DROP/REJECT/ACCEPT是终结动作
+        if table_name == 'filter' and chain_name in ['INPUT', 'OUTPUT', 'FORWARD']:
+            if action in ['DROP', 'REJECT', 'ACCEPT']:
+                return True
+        
+        # PREROUTING和POSTROUTING链的ACCEPT不是终结动作
+        if action == 'ACCEPT' and chain_name in ['PREROUTING', 'POSTROUTING']:
+            return False
+        
+        # 其他表的ACCEPT不是终结动作
+        if action == 'ACCEPT' and table_name and table_name != 'filter':
+            return False
+        
+        # 其他表的DROP/REJECT不是终结动作，应该继续处理后续表
+        if action in ['DROP', 'REJECT'] and table_name and table_name != 'filter':
+            return False
+        
+        return False
+
     def _is_builtin_chain(self, chain_name: str) -> bool:
         """判断是否为内置链"""
         builtin_chains = {
             "PREROUTING", "INPUT", "FORWARD", "OUTPUT", "POSTROUTING"
         }
         return chain_name in builtin_chains
+
+    def _is_chain_in_processing_path(self, chain_name: str, direction: str) -> bool:
+        """判断链是否在当前处理路径中"""
+        processing_path = self._get_processing_path_for_direction(direction)
+        return any(chain == chain_name for _, chain in processing_path)
+
+    def _handle_chain_jump(self, traffic_request: TrafficRequest, ruleset: RuleSet, 
+                          current_table: str, jump_target: str, simulation_result: SimulationResult,
+                          jump_history: List[str], direction: str) -> str:
+        """处理链跳转，考虑表限制"""
+        # 自定义链只能在同一个表中跳转
+        if not self._is_builtin_chain(jump_target):
+            return self._traverse_chain(
+                traffic_request, 
+                ruleset, 
+                current_table,  # 同一表
+                jump_target,
+                simulation_result,
+                jump_history,
+                direction
+            )
+        
+        # 内置链跳转需要检查是否在当前处理路径中
+        if self._is_chain_in_processing_path(jump_target, direction):
+            # 找到目标链所在的表，优先选择当前表之后出现的表
+            processing_path = self._get_processing_path_for_direction(direction)
+            target_table = None
+            current_table_found = False
+            
+            for table_name, chain_name in processing_path:
+                if table_name == current_table:
+                    current_table_found = True
+                    continue
+                if current_table_found and chain_name == jump_target:
+                    target_table = table_name
+                    break
+            
+            # 如果当前表之后没有找到，则查找第一个匹配的表
+            if not target_table:
+                for table_name, chain_name in processing_path:
+                    if chain_name == jump_target:
+                        target_table = table_name
+                        break
+            
+            if target_table:
+                return self._traverse_chain(
+                    traffic_request, 
+                    ruleset, 
+                    target_table,
+                    jump_target,
+                    simulation_result,
+                    jump_history,
+                    direction
+                )
+        
+        # 如果无法跳转，返回RETURN
+        if self.debug_mode:
+            logger.debug(f"无法跳转到链 {jump_target}，返回RETURN")
+        return "RETURN"
+    
+    @handle_nat_error
+    def _apply_nat_transformations(self, traffic_request: TrafficRequest, 
+                                 table_name: str, chain_name: str) -> Optional[TrafficRequest]:
+        """应用NAT转换"""
+        if not self.enable_nat or not self.nat_state:
+            return traffic_request
+        
+        # 在PREROUTING链中应用DNAT
+        if chain_name == "PREROUTING":
+            dnat_rule = self.nat_state.find_matching_dnat_rule(traffic_request)
+            if dnat_rule:
+                return self._apply_dnat(traffic_request, dnat_rule)
+        
+        # 在POSTROUTING链中应用SNAT
+        elif chain_name == "POSTROUTING":
+            snat_rule = self.nat_state.find_matching_snat_rule(traffic_request)
+            if snat_rule:
+                return self._apply_snat(traffic_request, snat_rule)
+        
+        return traffic_request
+    
+    @handle_nat_error
+    def _apply_dnat(self, traffic_request: TrafficRequest, dnat_rule: NATRule) -> TrafficRequest:
+        """应用DNAT转换"""
+        if not self.enable_nat or not self.nat_state:
+            return traffic_request
+        
+        # 创建或更新连接
+        connection = self.nat_state.find_existing_connection(traffic_request)
+        if not connection:
+            connection = self.nat_state.create_connection(traffic_request, dnat_rule)
+            self.match_stats['connection_tracks'] += 1
+        
+        # 应用转换
+        if connection.translated_destination_ip:
+            traffic_request.destination_ip = connection.translated_destination_ip
+        if connection.translated_destination_port:
+            traffic_request.destination_port = connection.translated_destination_port
+        
+        self.match_stats['nat_transformations'] += 1
+        
+        if self.debug_mode:
+            logger.debug(f"应用DNAT转换: {dnat_rule.rule_id}")
+        
+        return traffic_request
+    
+    @handle_nat_error
+    def _apply_snat(self, traffic_request: TrafficRequest, snat_rule: NATRule) -> TrafficRequest:
+        """应用SNAT转换"""
+        if not self.enable_nat or not self.nat_state:
+            return traffic_request
+        
+        # 创建或更新连接
+        connection = self.nat_state.find_existing_connection(traffic_request)
+        if not connection:
+            connection = self.nat_state.create_connection(traffic_request, snat_rule)
+            self.match_stats['connection_tracks'] += 1
+        
+        # 应用转换
+        if connection.translated_source_ip:
+            traffic_request.source_ip = connection.translated_source_ip
+        if connection.translated_source_port:
+            traffic_request.source_port = connection.translated_source_port
+        
+        self.match_stats['nat_transformations'] += 1
+        
+        if self.debug_mode:
+            logger.debug(f"应用SNAT转换: {snat_rule.rule_id}")
+        
+        return traffic_request
+    
+    @handle_connection_error
+    def _track_connection(self, traffic_request: TrafficRequest, 
+                         table_name: str, chain_name: str) -> None:
+        """跟踪连接状态"""
+        if not self.enable_nat or not self.connection_manager:
+            return
+        
+        # 查找相关的NAT规则
+        nat_rule = None
+        if chain_name == "PREROUTING":
+            nat_rule = self.nat_state.find_matching_dnat_rule(traffic_request) if self.nat_state else None
+        elif chain_name == "POSTROUTING":
+            nat_rule = self.nat_state.find_matching_snat_rule(traffic_request) if self.nat_state else None
+        
+        # 跟踪连接
+        self.connection_manager.track_connection(traffic_request, nat_rule)
+        
+        if self.debug_mode:
+            logger.debug(f"跟踪连接: {traffic_request.source_ip}:{traffic_request.source_port} -> "
+                        f"{traffic_request.destination_ip}:{traffic_request.destination_port}")
+    
+    def add_nat_rule(self, nat_rule: NATRule) -> None:
+        """添加NAT规则"""
+        if not self.enable_nat or not self.nat_state:
+            logger.warning("NAT功能未启用，无法添加NAT规则")
+            return
+        
+        if nat_rule.nat_type in [NATType.SNAT, NATType.MASQUERADE]:
+            self.nat_state.add_snat_rule(nat_rule)
+            logger.info(f"添加SNAT规则: {nat_rule.rule_id}")
+        elif nat_rule.nat_type in [NATType.DNAT, NATType.REDIRECT]:
+            self.nat_state.add_dnat_rule(nat_rule)
+            logger.info(f"添加DNAT规则: {nat_rule.rule_id}")
+    
+    def get_nat_stats(self) -> Dict[str, Any]:
+        """获取NAT统计信息"""
+        if not self.enable_nat or not self.nat_state:
+            return {"nat_enabled": False}
+        
+        stats = self.nat_state.get_connection_stats()
+        stats["nat_enabled"] = True
+        stats["nat_transformations"] = self.match_stats.get('nat_transformations', 0)
+        stats["connection_tracks"] = self.match_stats.get('connection_tracks', 0)
+        
+        return stats
+    
+    def get_connection_stats(self) -> Dict[str, Any]:
+        """获取连接统计信息"""
+        if not self.enable_nat or not self.connection_manager:
+            return {"connection_tracking_enabled": False}
+        
+        stats = self.connection_manager.get_connection_stats()
+        stats["connection_tracking_enabled"] = True
+        
+        return stats
     
     def _match_ip(self, packet_ip: str, rule_ip: str) -> bool:
         """匹配IP地址"""
@@ -622,7 +924,7 @@ class MatchingEngine:
             # 精确匹配
             return packet_interface == rule_interface
     
-    def _match_state(self, packet_state: str, rule_state: str) -> bool:
+    def _match_state(self, packet_state: str, rule_state: str, traffic_request: TrafficRequest = None) -> bool:
         """匹配连接状态"""
         if not packet_state or not rule_state:
             return False
@@ -632,7 +934,20 @@ class MatchingEngine:
         rule_states = set(s.strip().upper() for s in rule_state.split(','))
         
         # 检查是否有交集
-        return bool(packet_states & rule_states)
+        if packet_states & rule_states:
+            return True
+        
+        # 如果启用了连接跟踪，进行更精确的状态匹配
+        if self.enable_nat and self.connection_manager and traffic_request:
+            # 检查连接是否已建立
+            if "ESTABLISHED" in rule_states and self.connection_manager.is_connection_established(traffic_request):
+                return True
+            
+            # 检查连接是否相关
+            if "RELATED" in rule_states and self.connection_manager.is_connection_related(traffic_request):
+                return True
+        
+        return False
     
     def _generate_simulation_metadata(self) -> Dict[str, Any]:
         """生成模拟元数据"""
